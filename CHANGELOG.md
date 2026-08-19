@@ -502,6 +502,21 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   window came back nameless and unbound. The saved tab order now keeps a slot for every
   tab, claude or not, and the names go back on by position.
 
+## [0.1.1] - 2026-08-19
+
+### Fixed
+- **The bundled manual shipped a version behind.** `docs/MANUAL.md` was revised after the
+  0.1.0 `.vsix` had already been built, and `vsce package` reads the working copy at the
+  moment it runs — so the package that went to the Marketplace carried the 1579-line
+  manual while the repository had the 1629-line one, 136 lines apart. The manual is the
+  only file this affects: every other file in the 0.1.1 package is byte-identical to
+  0.1.0, verified by hash. There is no code change here.
+- **A note on the version number itself.** 0.1.0 cannot be re-uploaded — the Marketplace
+  refuses a duplicate version — so a rebuilt package has to be a new one. The bump is
+  also what lets an editor tell the two apart: a working copy installed as 0.1.0 and a
+  published 0.1.0 are indistinguishable to VS Code, which is why a stale local build sat
+  there reporting itself as up to date.
+
 ## [0.1.0] - 2026-08-18
 
 First release.
