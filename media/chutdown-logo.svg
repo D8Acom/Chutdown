@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-label="Chutdown">
+  <title>Chutdown</title>
+  <defs>
+    <linearGradient id="chut" x1="40" y1="24" x2="216" y2="232" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#7DD3FC"/>
+      <stop offset="0.5" stop-color="#38BDF8"/>
+      <stop offset="1" stop-color="#4F46E5"/>
+    </linearGradient>
+    <!-- notch out the ring where the power bar crosses it -->
+    <mask id="notch">
+      <rect width="256" height="256" fill="#000"/>
+      <path d="M175.57 184.69 A74 74 0 1 1 175.57 71.31"
+            fill="none" stroke="#fff" stroke-width="24" stroke-linecap="round"/>
+      <rect x="106" y="24" width="44" height="56" rx="8" fill="#000"/>
+    </mask>
+  </defs>
+
+  <!-- the C: an open ring, gap facing right -->
+  <path d="M175.57 184.69 A74 74 0 1 1 175.57 71.31"
+        fill="none" stroke="url(#chut)" stroke-width="24" stroke-linecap="round" mask="url(#notch)"/>
+
+  <!-- the power bar -->
+  <line x1="128" y1="36" x2="128" y2="110"
+        stroke="url(#chut)" stroke-width="24" stroke-linecap="round"/>
+</svg>

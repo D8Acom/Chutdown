@@ -1,0 +1,35 @@
+# Only what the extension needs at runtime ships in the VSIX.
+.git/**
+.gitignore
+.github/**
+.vscode/**
+.vscode-test/**
+
+# the author's own batch-terminal config, not a runtime asset
+.terminals
+
+# tests are development-only. media/make-chime.js stays: the chutdown.soundFile
+# setting description tells users to edit and re-run it.
+test/**
+
+# source logos live in the repo, not the package. The SVGs contributes.icons names -
+# media/letter-*.svg, media/tab-claude-*.svg - DO ship; these two are the drawing
+# make-icon.js renders media/icon.png (the Marketplace icon) from, so nothing at
+# runtime ever opens them. make-icon.js is a build tool for the same reason - and so
+# is make-font.js, which regenerates media/chutdown.ttf (the status bar's
+# O / F / S / H glyphs, which DO ship: contributes.icons points at them).
+media/chutdown-logo.svg
+media/chutdown-logo-mono.svg
+media/make-icon.js
+media/make-font.js
+
+# README screenshots: vsce rewrites the relative <img> paths to raw.githubusercontent,
+# so 620 KB of PNGs would ship in the VSIX and never be read from it.
+media/screenshots/**
+
+# git plumbing
+.gitattributes
+
+# repo-only docs
+suggestions.md
+**/*.vsix

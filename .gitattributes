@@ -1,0 +1,24 @@
+# Auto detect text files and perform LF normalization
+* text=auto
+
+# ...but never for anything this repository reads back as source, which is all of it.
+# core.autocrlf is true on the machine this is developed on, so `* text=auto` alone means
+# the working tree is LF while a fresh checkout is CRLF - and the damage lands on whoever
+# clones next, not on whoever committed.
+#
+# src/countdown.sh is the case with teeth. /bin/sh cannot parse a CRLF script at all: the
+# trailing \r joins the end of every line to the next token, so `set --` fails, the script
+# exits 2 having printed nothing, and startCountdownWindow sees a nonzero exit carrying
+# neither CHUTDOWN:NOW nor CHUTDOWN:CANCEL - which the three-outcome protocol reads as "the
+# window never appeared". It fails safe (the machine stays on, the gear stays armed), but
+# every Linux install loses the desktop countdown and wastes its first armed run, and
+# `vsce package` reads the working copy, so the broken one is what ships.
+#
+# The .js half is the trap this repository has already hit once: test/smoke.js regexes over
+# src/*.js with \n, and a checkout that flipped the line endings failed five tests that
+# looked nothing like a line-ending problem.
+*.sh   text eol=lf
+*.js   text eol=lf
+*.ps1  text eol=lf
+*.json text eol=lf
+*.md   text eol=lf

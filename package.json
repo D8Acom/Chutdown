@@ -1,0 +1,220 @@
+{
+  "name": "chutdown",
+  "displayName": "Chutdown",
+  "description": "Claude session traffic lights in the status bar, batch terminal launching from a .terminals file, and an armable auto-shutdown when every session finishes.",
+  "version": "0.1.0",
+  "license": "MIT",
+  "publisher": "d8a",
+  "repository": { "type": "git", "url": "https://github.com/D8Acom/Chutdown.git" },
+  "bugs": { "url": "https://github.com/D8Acom/Chutdown/issues" },
+  "homepage": "https://github.com/D8Acom/Chutdown#readme",
+  "icon": "media/icon.png",
+  "keywords": ["claude", "claude code", "terminal", "status bar", "shutdown", "traffic lights", "agents"],
+  "engines": { "vscode": "^1.93.0" },
+  "categories": ["Other"],
+  "activationEvents": ["*"],
+  "main": "./extension.js",
+  "scripts": { "test": "node test/smoke.js" },
+  "contributes": {
+    "icons": {
+      "chutdown-letter-o": { "description": "Opus - the O launch mark", "default": { "fontPath": "./media/chutdown.ttf", "fontCharacter": "\\E001" } },
+      "chutdown-letter-f": { "description": "Fable - the F launch mark", "default": { "fontPath": "./media/chutdown.ttf", "fontCharacter": "\\E002" } },
+      "chutdown-letter-s": { "description": "Sonnet - the S launch mark", "default": { "fontPath": "./media/chutdown.ttf", "fontCharacter": "\\E003" } },
+      "chutdown-letter-h": { "description": "Haiku - the H launch mark", "default": { "fontPath": "./media/chutdown.ttf", "fontCharacter": "\\E004" } }
+    },
+    "commands": [
+      { "command": "chutdown.toggle", "title": "Chutdown: Next Gear (off / sound / notify / shutdown)" },
+      { "command": "chutdown.testSound", "title": "Chutdown: Play the Finished Sound" },
+      { "command": "chutdown.testNotify", "title": "Chutdown: Show the Finished Popup" },
+      { "command": "chutdown.pickSound", "title": "Chutdown: Choose the Finished Sound" },
+      { "command": "chutdown.startAll", "title": "Chutdown: Start All Terminals (.terminals)" },
+      { "command": "chutdown.stopAll", "title": "Chutdown: Stop All Terminals (.terminals)" },
+      { "command": "chutdown.restartAll", "title": "Chutdown: Restart All Terminals (.terminals)" },
+      { "command": "chutdown.newClaude", "title": "Chutdown: New Claude Terminal" },
+      { "command": "chutdown.pickModels", "title": "Chutdown: Choose Models (launch buttons)" },
+      { "command": "chutdown.showTabs", "title": "Chutdown: Sessions & Terminals" },
+      { "command": "chutdown.focusTerminal", "title": "Chutdown: Show / Stop / Restart Batch Terminal" },
+      { "command": "chutdown.openTranscript", "title": "Chutdown: Open Session Transcript" },
+      { "command": "chutdown.showSession", "title": "Chutdown: Show Session" },
+      { "command": "chutdown.showStale", "title": "Chutdown: Idle Sessions" },
+      { "command": "chutdown.showHistory", "title": "Chutdown: Session History" },
+      { "command": "chutdown.setIdleMinutes", "title": "Chutdown: Fold Sessions Into Idle After..." },
+      { "command": "chutdown.setLookbackHours", "title": "Chutdown: How Far Back To Remember Sessions..." },
+      { "command": "chutdown.dismissSession", "title": "Chutdown: Close Session Light" },
+      { "command": "chutdown.dismissOrphans", "title": "Chutdown: Close All Sessions With No Tab Here" },
+      { "command": "chutdown.copySession", "title": "Chutdown: Copy Session Hover Text" },
+      { "command": "chutdown.renameSession", "title": "Chutdown: Rename Session" },
+      { "command": "chutdown.refreshTabNames", "title": "Chutdown: Put Session Names Back On The Tabs" },
+      { "command": "chutdown.copyTerminalLog", "title": "Chutdown: Copy Terminal Log" },
+      { "command": "chutdown.openUsagePage", "title": "Chutdown: Open Claude Usage Page" },
+      { "command": "chutdown.cycleUsageFocus", "title": "Chutdown: Show Next Usage Limit" },
+      { "command": "chutdown.newClaudeSlot1", "title": "Opus - the everyday workhorse: complex agentic coding, multi-file features, larger refactors, long autonomous runs. Start here. (Editor title icon - shown while Opus is one of your launch buttons; change them with 'Chutdown: Choose Models')", "icon": { "light": "media/letter-o-light.svg", "dark": "media/letter-o-dark.svg" } },
+      { "command": "chutdown.newClaudeSlot2", "title": "Fable - the most capable model, and the priciest: the hardest reasoning and longest-horizon work, the tasks Opus does not finish. (Editor title icon - shown while Fable is one of your launch buttons; change them with 'Chutdown: Choose Models')", "icon": { "light": "media/letter-f-light.svg", "dark": "media/letter-f-dark.svg" } },
+      { "command": "chutdown.newClaudeSlot3", "title": "Sonnet - near-Opus quality on coding and agentic work at a fraction of the cost: the cost-conscious pick for ordinary tasks. (Editor title icon - shown while Sonnet is one of your launch buttons; change them with 'Chutdown: Choose Models')", "icon": { "light": "media/letter-s-light.svg", "dark": "media/letter-s-dark.svg" } },
+      { "command": "chutdown.newClaudeSlot4", "title": "Haiku - fastest and cheapest: easy, well-scoped jobs like quick edits, renames, lookups, summaries, boilerplate. (Editor title icon - shown while Haiku is one of your launch buttons; change them with 'Chutdown: Choose Models')", "icon": { "light": "media/letter-h-light.svg", "dark": "media/letter-h-dark.svg" } }
+    ],
+    "terminal": {
+      "profiles": [
+        { "id": "chutdown.claude", "title": "claude", "icon": { "light": "media/tab-claude-light.svg", "dark": "media/tab-claude-dark.svg" } }
+      ]
+    },
+    "languages": [
+      { "id": "jsonc", "filenames": [".terminals", ".terminals.json"] }
+    ],
+    "menus": {
+      "commandPalette": [
+        { "command": "chutdown.focusTerminal", "when": "false" },
+        { "command": "chutdown.openTranscript", "when": "false" },
+        { "command": "chutdown.showSession", "when": "false" },
+        { "command": "chutdown.dismissSession", "when": "false" },
+        { "command": "chutdown.copySession", "when": "false" },
+        { "command": "chutdown.renameSession", "when": "false" },
+        { "command": "chutdown.copyTerminalLog", "when": "false" },
+        { "command": "chutdown.newClaudeSlot1", "when": "false" },
+        { "command": "chutdown.newClaudeSlot2", "when": "false" },
+        { "command": "chutdown.newClaudeSlot3", "when": "false" },
+        { "command": "chutdown.newClaudeSlot4", "when": "false" }
+      ],
+      "editor/title": [
+        { "command": "chutdown.newClaudeSlot1", "group": "navigation@-104", "when": "chutdown.slot1" },
+        { "command": "chutdown.newClaudeSlot2", "group": "navigation@-103", "when": "chutdown.slot2" },
+        { "command": "chutdown.newClaudeSlot3", "group": "navigation@-102", "when": "chutdown.slot3" },
+        { "command": "chutdown.newClaudeSlot4", "group": "navigation@-101", "when": "chutdown.slot4" }
+      ]
+    },
+    "configuration": {
+      "title": "Chutdown",
+      "properties": {
+        "chutdown.settleSeconds": {
+          "type": "number",
+          "default": 3,
+          "description": "Anti-flicker margin only: how long every session must have been finished (and written nothing, including background agents) before the sound or the armed action triggers. 'Finished' itself is read from the transcript — the turn's own stop_reason — so this covers a turn that is immediately continued by a queued message or hook, not a guess about whether Claude is done. Seconds, not minutes."
+        },
+        "chutdown.quietMinutes": {
+          "type": "number",
+          "default": 0,
+          "description": "OPTIONAL extra hold before the armed power action, on top of 'every session finished'. 0 = fire as soon as the last turn ends. The lights are not affected: red = turn done, orange = Claude asked a question."
+        },
+        "chutdown.soundFile": {
+          "type": "string",
+          "default": "",
+          "description": "Sound played in the 'sound' gear when every session has finished. Blank = the bundled media/chime.wav — a single struck ping, generated by media/make-chime.js (edit the note, decay or length there and re-run), with the chime that shipped before it still available as media/chime-classic.wav. A relative path resolves inside the extension folder (drop your own .wav in media/ and name it here); an absolute path is used as-is — e.g. C:\\Windows\\Media\\chimes.wav on Windows, /System/Library/Sounds/Submarine.aiff on macOS, /usr/share/sounds/freedesktop/stereo/complete.oga on Linux. A missing file falls back to that platform's system sound. The player is whatever the OS has: PowerShell's PlaySync on Windows, afplay on macOS, and the first of paplay, pw-play and aplay that is installed on Linux — so .oga and .ogg are offered there alongside .wav, since the stock Linux sound set is Ogg. A machine with none of those players says so once rather than chiming silently."
+        },
+        "chutdown.notifyStyle": {
+          "type": "string",
+          "enum": ["dialog", "toast"],
+          "default": "dialog",
+          "description": "How the 'notify' gear puts its popup on screen — a DESKTOP popup, not just an editor notification (that one is shown as well, either way). 'dialog' comes up on top of whatever is focused and waits there until you click it (WScript.Shell Popup on Windows, an osascript dialog on macOS, zenity --info or kdialog --msgbox on Linux, whichever is installed), and cannot be swallowed by Focus Assist / Do Not Disturb — which is why it is the default: a come-back-now popup that silently never appeared is worse than none. 'toast' is the quiet one instead: a Windows toast in the Action Center, a macOS Notification Centre banner, notify-send on Linux — it disappears on its own, and is suppressed while notifications are muted. On macOS a toast is only delivered if notifications are allowed for the process running osascript, and there is no fallback to the dialog there the way there is on Windows — if you set 'toast' and never see one, use 'dialog'."
+        },
+        "chutdown.questionMinutes": {
+          "type": "number",
+          "default": 2,
+          "description": "How long a session WAITING ON YOU holds the armed power action back — a pending question, a plan approval, a permission prompt (read from Claude Code's own status file, which is the only place a question appears until it is answered). The machine will not power off over a live question, but it does not wait all night for one either: after this many minutes the question is treated as abandoned and stops counting. 0 = questions never hold the shutdown up. The lights are unaffected — a session waiting on you is 🟠 for as long as it is waiting — and the sound and popup gears still fire, since being asked something is exactly when you want to be called back."
+        },
+        "chutdown.countdownPopup": {
+          "type": "boolean",
+          "default": true,
+          "description": "During the armed countdown, also put a DESKTOP window on screen — always on top, ticking down every second, with a Cancel button — as well as the VS Code notification. The point of the armed gear is that you walked away, and a countdown you can only see inside VS Code is no use from the other side of the room. Either one cancels; whichever you reach first. On Windows and Linux the window ticks (a PowerShell form; zenity --progress). On macOS it states the deadline rather than ticking, since an AppleScript dialog cannot be redrawn, and closes itself when the countdown ends. On a platform with none of those there is no desktop window and the countdown runs in the VS Code notification alone, which is said in the output channel rather than left to be noticed. Off leaves only the VS Code notification."
+        },
+        "chutdown.countdownSeconds": {
+          "type": "number",
+          "default": 120,
+          "description": "Cancellable countdown shown before the power action runs."
+        },
+        "chutdown.action": {
+          "type": "string",
+          "enum": ["shutdown", "restart", "logoff", "test"],
+          "default": "shutdown",
+          "description": "What to do when every session is finished. 'test' only shows a message. Windows, macOS and Linux each have a command for all three (shutdown.exe, an Apple event, systemctl/loginctl); on any other platform only 'test' can run — the armed gear refuses the rest at the click and says why, rather than counting down and stopping your dev servers for nothing."
+        },
+        "chutdown.forceCloseApps": {
+          "type": "boolean",
+          "default": false,
+          "description": "Do not let another application stop the power action. Windows passes /f to shutdown. macOS asks the OS for the pids of every app with a Dock icon — one Apple event, under the System Events grant Chutdown already asks for when you arm the gear — and sends those SIGTERM, then SIGKILL, before the power event; VS Code itself is excluded. Linux passes -i to systemctl, which ignores the inhibitor locks a media player, an unsaved editor or a running package manager takes out. On ALL THREE this destroys unsaved work in those applications: that is the point of it, since an app sitting on a save dialog is exactly what keeps the machine on all night. A log out is left alone everywhere — Windows applies no /f to 'shutdown /l', macOS runs no sweep before 'log out', and there is no inhibitor to ignore on a Linux terminate-session. Off, the power action asks politely and any application can refuse it. The armed gear says which of the two you are getting, at the click and in its hover."
+        },
+        "chutdown.terminalsFile": {
+          "type": "string",
+          "default": ".terminals",
+          "description": "Workspace-root file listing the batch terminals to launch. JSON inside — { \"web\": { \"cmd\": \"npm run dev\", \"port\": 3003 } }, with comments and trailing commas allowed — though the original one-per-line 'name @ subfolder = command' syntax is still read too. A '.json' twin of this name ('.terminals.json') is also looked for, as a leftover from when the sample button wrote that name; the plain name wins when both exist."
+        },
+        "chutdown.freePortsOnStart": {
+          "type": "boolean",
+          "default": true,
+          "description": "Before (re)launching a '.terminals' entry named 'name:port', force-kill whatever is LISTENing on that port - including servers started outside VS Code - and wait for the socket to clear (netstat + taskkill on Windows, lsof + kill on macOS, ss - falling back to lsof - plus the same kill on Linux; pgrep must be installed for the tree walk). Off means a busy port silently moves the new server to the next free one instead."
+        },
+        "chutdown.noReplyMinutes": {
+          "type": "number",
+          "default": 5,
+          "description": "A prompt that was submitted and then cancelled (Esc / Ctrl+C before the first token) leaves no 'interrupted' marker in the transcript, so it is indistinguishable from one whose answer is still coming. After this many minutes with no reply at all the light gives up on it: 🟠 instead of a 🟢 that never ends. The sound and the armed shutdown wait twice as long before they stop counting it as work. 0 disables both (a cancelled prompt then blocks them for ever again). Measured against 1320 answered prompts on this machine, the slowest first response took 5 minutes — set it lower only if you never see slow first tokens."
+        },
+        "chutdown.staleMinutes": {
+          "type": "number",
+          "default": 30,
+          "description": "Sessions quiet longer than this fold out of the individual traffic lights into the single '(n) idle' dropdown entry — UNLESS a tab in this window is running it, which keeps its light however long it sits. Editable from the idle entry's own hover (Idle after…), which is where you notice it."
+        },
+        "chutdown.orphanMinutes": {
+          "type": "number",
+          "default": 2,
+          "description": "A session with no terminal tab in this window stays white for this long after its last transcript write (something in another window may still be running it). After that its light is resolved from the transcript instead: orange if the last turn was interrupted, red if it finished. Display rule only — a long tool call can write nothing for longer than this, so the sound and the armed shutdown do not use this threshold; they wait 15 minutes."
+        },
+        "chutdown.claudeButtons": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": ["opus = claude-opus-5", "fable = claude-fable-5", "sonnet = claude-sonnet-5", "haiku = claude-haiku-4-5"],
+          "description": "One status bar launch button per entry, wearing that model's letter mark - the same O / F / S / H the editor title bar uses, or a $(sparkle) for a model outside the catalog. Each entry is 'label = model' (model is passed to 'claude --model'), or just a model id used as both. Empty list falls back to a single plain 'claude' button. The default list is trimmed to the models your Claude plan reports (a plan without Fable, and without usage credits switched on, gets no Fable button); a list you pick yourself is used exactly as written. Rather than editing this by hand, run 'Chutdown: Choose Models' (or the link in any launch button's hover) to tick the models you want - the hover on each button says what that model is best used for."
+        },
+        "chutdown.editorTitleButtons": {
+          "type": "boolean",
+          "default": true,
+          "description": "Also show the model launch buttons top-right in the editor title bar, leftmost in that row (first four claudeButtons entries: O / F / S / H letter icons in entry order)."
+        },
+        "chutdown.aiNames": {
+          "type": "boolean",
+          "default": true,
+          "description": "Use a cheap Claude model (headless 'claude -p') to give each session a unique one-word tab name based on its task. A grey ⚪ status bar entry shows while it thinks."
+        },
+        "chutdown.aiNamesModel": {
+          "type": "string",
+          "default": "claude-haiku-4-5-20251001",
+          "description": "Model id passed to 'claude -p --model' for tab naming."
+        },
+        "chutdown.openInEditorArea": {
+          "type": "boolean",
+          "default": true,
+          "description": "Claude terminals open as tabs in the main editor area (not the bottom terminal panel), and clicking a traffic light moves its terminal there."
+        },
+        "chutdown.restoreTabNames": {
+          "type": "boolean",
+          "default": true,
+          "description": "When a window loads, put the session names back on every claude tab it finds - the ones VS Code restored as plain 'claude' after a quit, the ones a reload reconnected, and the ones already running claude before the window opened. Only the active tab can be renamed, so the tabs are flicked through once at startup; focus is not taken. Run it again any time with 'Chutdown: Put Session Names Back On The Tabs'."
+        },
+        "chutdown.identifyTabs": {
+          "type": "boolean",
+          "default": true,
+          "description": "Work out which session a still-unnamed claude tab is running by matching its process against claude's own ~/.claude/sessions/<pid>.json files, and put that session's name back on the tab. Covers claude terminals that were already running before the window loaded. Runs one process listing (Get-CimInstance on Windows, ps on macOS and Linux) at most once every 15 seconds, and only while a tab is unidentified."
+        },
+        "chutdown.lookbackHours": {
+          "type": "number",
+          "default": 24,
+          "description": "How far back a session is remembered at all: sessions touched within this many hours get a traffic light or an idle entry, older ones are not scanned. Bigger values read more transcripts on every poll. Editable from the idle entry's hover (Remember for…) and from the bottom of the history list."
+        },
+        "chutdown.usageMeter": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show a Claude usage meter in the status bar (the same limits /usage shows); hover for the session / weekly / per-model breakdown. It needs no sign-in token on any platform: with none to poll with it paints the reading Claude Code itself last cached, labelled with its age."
+        },
+        "chutdown.usagePollMinutes": {
+          "type": "number",
+          "default": 5,
+          "description": "How often the usage meter refreshes from the server. Only applies while there is a live sign-in token to poll with — without one the meter shows the reading Claude Code itself last cached, labelled with its age, and this setting paces nothing."
+        },
+        "chutdown.usageKeychain": {
+          "type": "boolean",
+          "default": false,
+          "scope": "machine",
+          "description": "An UPGRADE to the usage meter on macOS, not a requirement for it. The meter already works there with this off: it shows the numbers Claude Code itself last cached, labelled with their age, which needs no token, no network and no permission. What it cannot do is refresh them, because macOS keeps the Claude Code sign-in in your login Keychain rather than in a credentials file, and this is what lets the meter read it — /usr/bin/security find-generic-password -s \"Claude Code-credentials\". Off by default because it is another application's Keychain item: the read is normally silent (the item's own permissions trust /usr/bin/security itself), but on some macOS builds it raises a password prompt that 'Always Allow' cannot settle, and on macOS 26 it can hang instead of failing — so it is switched on by a deliberate click and never on a fresh install. Ignored on Windows and on Linux, where the sign-in is ~/.claude/.credentials.json and the meter reads it directly."
+        }
+      }
+    }
+  }
+}

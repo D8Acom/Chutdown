@@ -1,0 +1,21 @@
+{
+  "// what this is": "one terminal per entry - the .terminals button launches them all",
+  "// the shapes": "NAME: command   or   NAME: { cmd, cwd, port }",
+  "// the name": "just a label - it names the terminal tab and its status bar light",
+  "// the folder": "cwd, relative to this file. Without it an entry runs in the workspace root",
+  "// a note, or an off switch": "any key starting with // is ignored - like the four below",
+
+  "// FOR THE AGENT WORKING HERE: how to reset one of these": "do not kill it and start your own copy in your own shell - that copy dies with your session and is invisible here. Run a line below instead and the editor restarts the entry itself: same terminal tab, port taken back first, light and log still pointing at it.",
+  "//   reset one entry": "code --open-url \"vscode://d8a.chutdown/restart?name=web&ws=c:/Users/user/Documents/detf/tools/Chutdown\"",
+  "//   name= is a key from this file": "\"web\", or its full name \"web:3000\" - case-insensitive. Drop name= entirely and every entry restarts.",
+  "//   /start and /stop, same shape": "/start leaves an entry that is already answering alone; /stop is Ctrl+C, then the port if Ctrl+C is ignored, tab left open.",
+  "//   ws= is which window": "a vscode:// link goes to the LAST ACTIVE editor window - one open on another folder sees this and ignores it. Keep it as written.",
+  "//   how to tell it worked": "the command prints nothing either way. The light goes amber then green, and every failure (unknown name, missing folder) is a line in View -> Output -> Chutdown. Never a dialog.",
+  "//   on macOS, once": "the Command Palette -> \"Shell Command: Install 'code' command in PATH\", or `code` is not on PATH and these lines do nothing at all.",
+  "// ...or from the editor": "the Command Palette -> Chutdown: Restart All Terminals",
+
+  "// dev": "npm run dev",
+  "// web": { "cmd": "npm run dev", "port": 3000 },
+  "// api": { "cmd": "npm run dev", "cwd": "packages/api", "port": 4000 },
+  "// d8a": { "cmd": "npm start", "cwd": "D8A" }
+}
