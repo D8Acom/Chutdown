@@ -15,6 +15,11 @@ Thumbs.db
 *.log
 npm-debug.log*
 
+# The launch thread. Authoring notes ABOUT the extension, not part of it, and not for the
+# public repo either. Also in .vscodeignore, because the two lists are independent: this
+# one keeps it off GitHub, that one keeps it out of the .vsix.
+TWEETME.md
+
 # The smoke suite and the CI job that ran it - HELD BACK, not abandoned.
 #
 # `node test/smoke.js` passes 782/0 on the machine this is developed on, on a fresh clone

@@ -502,6 +502,53 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   window came back nameless and unbound. The saved tab order now keeps a slot for every
   tab, claude or not, and the names go back on by position.
 
+## [0.1.2] - 2026-08-19
+
+### Fixed
+- **The usage meter showed nothing at all on a machine that had never had a reading, which
+  read as a broken feature rather than an empty one.** With no sign-in to poll with
+  (`~/.claude/.credentials.json`, or `CLAUDE_CODE_OAUTH_TOKEN`) AND no reading Claude Code
+  had cached (`~/.claude.json` → `cachedUsageUtilization`), `renderUsage` withdrew the
+  status bar item outright and wrote the reason only to the Chutdown output channel. The
+  reasoning was sound as far as it went — a slot whose click is registered, accepted and
+  does nothing is an apology, not a control — but it missed what absence actually says to
+  the person looking at it, which is "this is broken", not "nothing to report"; and the
+  one place the real reason was written is a channel nobody opens unprompted. This was not
+  hypothetical: it was found by installing the published build on a second Windows machine
+  and reading the meter as missing.
+  The slot is now painted in every first-run state, and the original objection is answered
+  on its own terms rather than dropped — **the click always goes somewhere real.** On macOS
+  with `usageKeychain` off it still goes to that setting, the shortest route to a live
+  meter; everywhere else it opens the claude.ai usage page. The hover leads with the fix
+  that costs nothing — run `/usage` once in Claude Code and the reading it leaves behind is
+  painted from then on, with no token, no network and no permission prompt. The `everRead`
+  latch is unchanged in purpose: the item is now contributed from the first poll and never
+  withdrawn, which moves the tray's neighbours once **less** than the old absent → present
+  transition did, not more.
+- **That hover's codicons rendered as literal `$(link-external)` text**, because it was
+  built without `supportThemeIcons`. Fixed for this hover; the main reading hover still has
+  it and is tracked separately.
+
+### Changed
+- **The meter now opens on the SESSION window, and always says which limit it is showing.**
+  It used to open on whatever was tightest-with-room, and suppress the label in exactly
+  that case — so the same bare `62%` meant the session one day and the weekly Fable window
+  the next, with nothing in the status bar to tell them apart. A reading you have to hover
+  to identify is not a reading you can glance at, which is the whole job of the slot. It is
+  now `62% 3h20m` — the session, labelled with what is left of it (or `5h` where the server
+  sent no reset time), whatever else is tighter. A spent session is no longer stepped past
+  either: `0% 4h12m` is the most useful sentence the meter can say — out now, back then —
+  where a spent *weekly* window pinned at 0% for days was only ever a fact about a model you
+  were done with. Accounts that report no session window at all fall back to the previous
+  behaviour, unchanged. Every other limit stays one click away, tightest-first, and the full
+  list stays on the hover.
+- **The hover no longer calls a limit spent when it merely has less room than the one on
+  screen.** The note explaining the default read `it opens past X, which is spent`, which
+  was safe only while the default WAS the tightest. With a session default it would have
+  fired on almost every account, asserting spentness of whatever happened to be tightest.
+  It is now gated on that window actually being spent, and where it has room the note names
+  it honestly instead: `Weekly - all models is tighter, at 45% left`.
+
 ## [0.1.1] - 2026-08-19
 
 ### Fixed

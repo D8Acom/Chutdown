@@ -30,6 +30,9 @@ media/screenshots/**
 # git plumbing
 .gitattributes
 
-# repo-only docs
+# repo-only docs. TWEETME.md is the launch thread - authoring notes about the extension,
+# not a runtime asset, and it was shipping inside the 0.1.2 package until this line: vsce
+# takes everything not excluded, so a new file in the root is IN the VSIX by default.
 suggestions.md
+TWEETME.md
 **/*.vsix

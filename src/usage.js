@@ -688,18 +688,35 @@ function byTightest(limits) {
     return limits.slice().sort((a, b) => pctLeft(a.percent) - pctLeft(b.percent));
 }
 
-/// What the meter OPENS on. Tightest first - the window you hit first is the one worth
-/// watching - except a window that is spent. A weekly Fable limit at 0% left pins the
-/// meter to '0%' for days, and that is not a reading about whether you can work right
-/// now; it is a fact about a model you are done with until the window turns over. The
-/// click already stepped past it, and this is the same step taken before the first look,
-/// because a spent window is just as spent after the next window reload.
+/// What the meter OPENS on: the SESSION window, whenever the account reports one.
 ///
-/// If EVERY window is spent there is nothing to step to, and the tightest is then the
-/// honest answer - the meter says 0% because 0% is the news.
+/// It used to open on whatever was tightest-with-room, and the argument for that was that
+/// the window you hit first is the one worth watching. What it cost was a meter whose
+/// meaning moved: the same '62%' meant the session on Monday and the weekly Fable window
+/// on Tuesday, and nothing in the status bar said which - the label was deliberately
+/// suppressed in exactly the case where the number was the tightest. A reading you have to
+/// hover to identify is not a reading you can glance at, which is the whole job of this
+/// slot.
+///
+/// The session is the right constant. It is the window that governs whether you can work
+/// in the next few minutes, it is the one that turns over often enough to be worth
+/// watching, and it is the one every account has. A spent session is NOT stepped past the
+/// way a spent weekly window was: '0%' with '4h12m' beside it is the most useful sentence
+/// the meter can say - out now, back then - where a spent weekly Fable limit pinned at 0%
+/// for days was only ever a fact about a model you were done with. Everything else is one
+/// click away and all of it is on the hover.
+///
+/// With no session reported at all (an endpoint that stopped sending it, a shape we do not
+/// parse) the old behaviour is the fallback, unchanged: tightest-with-room, then tightest.
 function defaultLimit(order) {
-    return order.find((l) => pctLeft(l.percent) > 0) || order[0];
+    return order.find(isSession) || order.find((l) => pctLeft(l.percent) > 0) || order[0];
 }
+
+/// The session row, whatever the endpoint called it. Both shapes parseLimits produces name
+/// it 'Session (5h)' - the array branch from `kind === 'session'`, the object branch from
+/// the `five_hour` key - and shortName already matches the same prefix to turn it into a
+/// countdown, so the prefix is the contract rather than the exact parenthesis.
+function isSession(l) { return /^Session \(/.test(l.name); }
 
 /// The row the status bar number comes from. A focus that no longer exists - the window
 /// reset away, the plan changed, the endpoint stopped reporting it - falls back to the
@@ -839,16 +856,46 @@ function setCommand(item, cmd) {
     if (item.command !== cmd) item.command = cmd;
 }
 
-/// macOS, `usageKeychain` off, and no cached reading to stand in: the one state where the
-/// meter has no number at all AND could have one by two different routes. Rather than a
-/// slot saying "usage?" whose click does nothing, the item becomes the shorter of the two
-/// routes - one click straight to the setting - and the hover names both, cheapest first.
-/// Running /usage in Claude Code is genuinely free: it needs no token of ours, no network
-/// of ours and no Keychain prompt, and one run is enough for the meter to have numbers
-/// from then on. Switching the setting on is the upgrade that keeps them fresh.
-function paintKeychainOffer(usageItem) {
+/// THE FIRST RUN: no number at all, on any platform, because nothing has ever produced
+/// one on this machine. Every route into it ends up here.
+///
+/// This used to be two different answers. macOS with `usageKeychain` off got the hover
+/// below - the one state thought worth explaining, because a click could fix it. Every
+/// OTHER way of having no number - a fresh Windows or Linux box where Claude Code has not
+/// yet written a reading and there is no sign-in to poll with - got `unpaint`, i.e. no
+/// status bar item whatsoever, with the reason written only to the output channel. The
+/// argument for that was sound as far as it went: a slot saying "usage?" whose click does
+/// nothing is not a control, it is an apology. What it missed is that ABSENCE is not
+/// read as "nothing to report" by the person looking at it - it is read as "this feature
+/// is broken or missing", and the one place the real reason was written is a channel
+/// nobody opens unprompted. That is not a hypothetical: this extension's own author
+/// installed the published build on a second Windows machine and reported the meter as
+/// missing.
+///
+/// So the slot is now painted in every first-run state, and the objection is answered on
+/// its own terms rather than ignored - the click always goes somewhere real. On macOS
+/// with the setting off that is still the setting itself, one click, the shortest route
+/// to a live meter. Everywhere else it is the claude.ai usage page: not a fix for the
+/// meter, but the actual numbers, which is what the click was reaching for.
+///
+/// The hover leads with the free fix in both cases. Running /usage in Claude Code needs
+/// no token of ours, no network of ours and no permission prompt anywhere, and one run
+/// leaves a reading in ~/.claude.json that this meter paints from then on.
+///
+/// This does not reintroduce the churn `everRead` exists to prevent. That latch stops the
+/// item vanishing again once a number has landed; painting here means the slot is present
+/// from the first poll instead of appearing later, so it moves the tray's neighbours
+/// strictly LESS than the old absent -> present transition did.
+function paintNothingYet(usageItem) {
+    // The two-route state (macOS, Keychain readable but not switched on) is the only one
+    // with a setting worth offering; everywhere else naming it would be noise about a
+    // toggle that is ignored on this platform.
+    const keychain = credState === 'keychain:off';
     const md = new vscode.MarkdownString();
     md.isTrusted = { enabledCommands: ['workbench.action.openSettings', 'chutdown.openUsagePage'] };
+    // Without this the codicons in the links below render as the literal text
+    // '$(link-external)', which is what they were doing here before.
+    md.supportThemeIcons = true;
     md.appendMarkdown('**Claude usage** - nothing to show yet  \n\n');
     // The cheaper fix first, and it really is free: /usage costs one request Claude Code
     // was going to make anyway, and it leaves the reading behind in ~/.claude.json where
@@ -856,14 +903,21 @@ function paintKeychainOffer(usageItem) {
     md.appendMarkdown('Run `/usage` once in Claude Code and Chutdown will show that reading, ' +
         'with its age - no token, no network and no permission prompt.  \n\n');
     // ...then the state's own sentence, which is the diagnosis and the upgrade in one.
-    // Escaped like every other hover here: it names a setting id, and the dots and
-    // underscores in one are markdown.
-    md.appendMarkdown('_' + shared.mdText(credText()) + '_  \n');
-    md.appendMarkdown('\n[$(gear) chutdown.usageKeychain]' +
+    // Escaped like every other hover here: it names a setting id and a file path, and the
+    // dots, underscores and backslashes in those are markdown.
+    const why = credText();
+    if (why) md.appendMarkdown('_' + shared.mdText(why) + '_  \n');
+    if (keychain) md.appendMarkdown('\n[$(gear) chutdown.usageKeychain]' +
         '(command:workbench.action.openSettings?%22chutdown.usageKeychain%22)  \n');
     md.appendMarkdown('\n[$(link-external) claude.ai usage settings](command:chutdown.openUsagePage)');
-    setCommand(usageItem, KEYCHAIN_SETTING);
-    shared.paint(usageItem, { text: '$(key) usage', backgroundColor: undefined, tooltip: md });
+    setCommand(usageItem, keychain ? KEYCHAIN_SETTING : 'chutdown.openUsagePage');
+    // '$(pulse) usage' without the question mark: the meter's own icon, and a label that
+    // states what the slot is rather than asking the user something they cannot answer.
+    shared.paint(usageItem, {
+        text: keychain ? '$(key) usage' : '$(pulse) usage',
+        backgroundColor: undefined,
+        tooltip: md
+    });
 }
 
 function renderUsage() {
@@ -891,17 +945,20 @@ function renderUsage() {
     // how long your conversations are, not of what you have spent), cannot see the
     // sub-agent fleet at all, and has no denominator anywhere on disk to turn into the
     // percentage this slot's entire vocabulary is made of. So there is nothing to
-    // repurpose it into, and the item is simply not contributed until there is something
-    // to say - with one exception below, where a click CAN fix the emptiness.
+    // repurpose it into. What it gets instead is a slot that says so, and whose click
+    // goes somewhere real - see paintNothingYet, which also records why the older
+    // behaviour (no item at all) turned out to be the worse of the two.
     //
-    // The hide is a first-run state only. Once any reading has landed, `everRead` holds
-    // for the life of the window and the slot keeps its place: a meter that came and went
-    // as readings expired would shove every neighbouring item along the tray each time,
-    // and a stale number saying why it is stale is better than that. So the item moves at
-    // most once, absent -> present, and never back.
+    // `everRead` still matters, just not as a hide. Once a reading has landed the latch
+    // holds for the life of the window, so an expired reading is answered with the
+    // question mark below rather than by dropping the item and shoving every neighbouring
+    // entry along the tray. The item is now contributed from the first poll and never
+    // withdrawn, which is one fewer move than before, not one more.
     if (!limits.length) {
-        if (credState === 'keychain:off') { paintKeychainOffer(usageItem); return; }
-        if (!everRead) { shared.unpaint(usageItem); return; }
+        // keychain:off is checked whether or not a reading has ever landed: it is the one
+        // state a CLICK can still fix, so it keeps the offer even after an earlier
+        // reading has expired. !everRead is the first run, on every platform.
+        if (credState === 'keychain:off' || !everRead) { paintNothingYet(usageItem); return; }
         // Nothing to cycle through, so the click goes where the question goes.
         setCommand(usageItem, 'chutdown.openUsagePage');
         shared.paint(usageItem, {
@@ -915,11 +972,13 @@ function renderUsage() {
     const order = byTightest(limits);
     const shown = focused(limits);
     const left = pctLeft(shown.percent);
-    // A bare '62%' still means the tightest limit, exactly as it always did. The word is
-    // there when the number is NOT that - because you clicked past it, or because the
-    // tightest window is spent and the meter opened past it on your behalf. Without it,
-    // a meter that skips a spent window would read as if that window had reset.
-    const labelled = !!focus || shown !== order[0];
+    // ALWAYS labelled now. A bare '62%' used to mean "this is the tightest limit", which
+    // asked the reader to know both that rule and which window was currently tightest
+    // before the number meant anything - and the label was suppressed in precisely the
+    // case where it was hardest to guess. One word is a cheap price for a number that
+    // says what it is: '62% 3h20m' is the session with three hours left on it, whether or
+    // not anything else is tighter, and '40% Fable' is not mistakable for it.
+    const labelled = true;
 
     const md = new vscode.MarkdownString();
     // The two links below. openSettings is VS Code's own, and the only argument it is ever
@@ -943,12 +1002,20 @@ function renderUsage() {
     for (const l of limits)
         md.appendMarkdown('`' + bar(l.percent) + '` **' + (l === shown ? '▸ ' : '') +
             shared.mdText(l.name) + '**: ' + pctLeft(l.percent) + '% left' + resetIn(l.resetsAt) + '  \n');
+    // The second clause is gated on the tightest window actually being SPENT, not merely
+    // on it not being the one shown. It reads as an explanation of the default, and the
+    // default is now the session window rather than the tightest - so "it opens past X"
+    // is true of almost every account, while "which is spent" is true only of some, and
+    // the pair asserted together would be a sentence the meter invents. Where the tightest
+    // window has room, the honest note is which one is tighter than the one on screen.
     if (limits.length > 1)
         md.appendMarkdown('\n_Click the meter for the next limit' +
             (focus ? ' - it is showing **' + shared.mdText(shown.name) + '**, not the default.'
-                : shown !== order[0]
-                    ? ' - it opens past **' + shared.mdText(order[0].name) + '**, which is spent.'
-                    : '.') + '_  \n');
+                : shown === order[0] ? '.'
+                    : pctLeft(order[0].percent) <= 0
+                        ? ' - it opens past **' + shared.mdText(order[0].name) + '**, which is spent.'
+                        : ' - **' + shared.mdText(order[0].name) + '** is tighter, at ' +
+                            pctLeft(order[0].percent) + '% left.') + '_  \n');
     // One limit is not a cycle. The click used to be wired to it anyway, and stepping
     // through a list of one repainted the identical number - a control that accepts the
     // click and does nothing with it. An account reporting a single window is the ordinary
