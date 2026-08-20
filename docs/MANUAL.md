@@ -64,6 +64,35 @@ back to a live light.
 has been quiet, the latest answer, the prompt that started it and the one you last sent — without focusing
 its terminal.*
 
+### When the bar is full
+
+A busy afternoon is four launch buttons, a dozen session lights and three dev servers,
+and the status bar is one line with no scroll: VS Code drops whatever does not fit,
+rightmost first — which is the idle entry, the usage meter and the batch lights. Rather
+than lose them, the three things that grow (the launch buttons, the session lights, the
+batch terminal lights) **compact together, in steps, once they are estimated to pass
+`chutdown.statusBarBudget`** (default **120**, roughly in characters):
+
+| step | launch buttons | session lights | batch lights |
+| --- | --- | --- | --- |
+| full | **O** opus | 🟢 recapture | 🟢 backstop |
+| letters | **O** | 🟢 recapture | 🟢 backstop |
+| short | **O** | 🟢 recaptu… | 🟢 backsto… |
+| shorter | **O** | 🟢 reca… | 🟢 back… |
+| lights | **O** | 🟢 | 🟢 back… |
+| bare | **O** | 🟢 | 🟢 |
+
+Buttons lose their words first because the letter already says what they are; the
+session lights go bare before the batch lights because there are usually more of them
+and a dev server's name is the more useful one to keep. **Whatever a light stops saying,
+its hover still says** — a cut or dropped name leads the hover in bold. The level is
+settled once per poll, before any light is painted, so one render never shows two levels,
+and the buttons and batch lights move in the same poll as the session lights; as the
+crowd thins it steps back up. The extension API has no way to read the bar's real width,
+so the budget is an estimate: raise it on a wide screen, lower it on a laptop, **0 =
+never compact**, 1 = always as compact as it gets. A move is logged in the *Chutdown*
+output channel (`density: full -> letters …`).
+
 **Names** start by SCANNING the whole first prompt for its distinctive words — stopwords
 and generic verbs ("the", "can", "fix"…) are skipped and the survivors are ranked
 longest first — so the tab shows a real task word immediately, and the words behind it
@@ -105,9 +134,14 @@ Bash as the default profile, a whole window of restored tabs reads `bash`. So th
 are also saved in tab order, with a slot for *every* tab, claude or not: at startup those
 slots are lined up with the restored tabs and the names go back on by position
 (`restoreTabNames`, on by default). A session that has aged out of
-`lookbackHours` gets the exact title it wore at quit time. Those tabs are empty shells, so
-clicking their light resumes the session **into that tab** (`claude --resume`) rather than
-opening a second one beside it.
+`lookbackHours` gets the exact title it wore at quit time. Those tabs are empty shells — the
+pty host died with the app, and what VS Code relaunched is a fresh shell — so once the tabs
+have settled each one is **resumed automatically**: `claude --resume <id>` is typed into
+that same tab, and the sessions come back where they were (`autoResume`, on by default; the
+log line reads `revive: re-bound 3 claude tab(s) by tab slot after a restart - resumed 3 of
+them`). With `autoResume` off the tabs keep their names and clicking a session's light
+resumes it **into its tab** rather than opening a second one beside it. A plain window
+reload never resumes anything: those shells survive, and their claudes with them.
 
 **Every tab is named at startup, not just the one in front.** Only the *active* terminal can
 be renamed — the workbench has no "rename that other tab" command — so once everything that
@@ -327,7 +361,8 @@ Open Claude **through the extension** and its tab is ours to manage:
   keeps a `$(sparkle)`. Each entry is `label = model`, with the model passed to
   `claude --model`. **The hover says what that model is best used for** — four
   buttons side by side is guesswork otherwise, and the status bar has room for a
-  label and nothing else:
+  label and nothing else (and on a crowded bar not even that: the labels are the
+  first thing to go, leaving the letters — see *When the bar is full* above):
 
   | button | model | best used for |
   | --- | --- | --- |
@@ -1564,8 +1599,10 @@ Together: **~38 ms per scan → ~9 ms** on a store of 600 transcripts across 22 
 each section lives in its own module under `src/`: `shared.js` (cross-section state),
 `scan.js` (transcript scanning + scanned-word names), `claude.js` (claude terminals:
 launch buttons, tab renaming, binding), `lights.js` (traffic lights + dropdowns),
-`naming.js` (AI name verification), `identify.js` (pairing an already-running claude
-with its tab through the process tree), `usage.js` (usage meter), `terminals.js` (the
+`density.js` (how much the bar has room to say — the compaction ladder every painter
+asks for its text), `naming.js` (AI name verification), `identify.js` (pairing an
+already-running claude with its tab through the process tree), `usage.js` (usage
+meter), `terminals.js` (the
 `.terminals` file itself — both syntaxes), `batch.js` (the terminals it launches),
 `shutdown.js` (the off/sound/notify/armed toggle + the poll and the
 transcript watcher that drive it), and `platform/` (every call that differs

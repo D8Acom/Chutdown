@@ -688,35 +688,21 @@ function byTightest(limits) {
     return limits.slice().sort((a, b) => pctLeft(a.percent) - pctLeft(b.percent));
 }
 
-/// What the meter OPENS on: the SESSION window, whenever the account reports one.
+/// What the meter OPENS on (USER'S RULING, 2026-08-20): the limit with the LOWEST "% left"
+/// that still has room in it - the window you will hit first - and the click steps on from
+/// there. For a while it opened on the session window instead, on the argument that a
+/// number whose meaning moved between windows had to be hovered to be read; that argument
+/// went away once the number was always labelled ('45% 4d' cannot be mistaken for the
+/// session), and what was left was a meter showing a comfortable session while a weekly
+/// window ran dry behind it. The lowest number is the one worth the slot.
 ///
-/// It used to open on whatever was tightest-with-room, and the argument for that was that
-/// the window you hit first is the one worth watching. What it cost was a meter whose
-/// meaning moved: the same '62%' meant the session on Monday and the weekly Fable window
-/// on Tuesday, and nothing in the status bar said which - the label was deliberately
-/// suppressed in exactly the case where the number was the tightest. A reading you have to
-/// hover to identify is not a reading you can glance at, which is the whole job of this
-/// slot.
-///
-/// The session is the right constant. It is the window that governs whether you can work
-/// in the next few minutes, it is the one that turns over often enough to be worth
-/// watching, and it is the one every account has. A spent session is NOT stepped past the
-/// way a spent weekly window was: '0%' with '4h12m' beside it is the most useful sentence
-/// the meter can say - out now, back then - where a spent weekly Fable limit pinned at 0%
-/// for days was only ever a fact about a model you were done with. Everything else is one
-/// click away and all of it is on the hover.
-///
-/// With no session reported at all (an endpoint that stopped sending it, a shape we do not
-/// parse) the old behaviour is the fallback, unchanged: tightest-with-room, then tightest.
+/// A SPENT window (0% left) is still stepped past by default: pinned at 0% for days it says
+/// nothing about whether you can work right now, and it is one click away (the click walks
+/// every limit, spent ones included). Only when every window is spent does the meter open
+/// on 0% - then that is the whole news.
 function defaultLimit(order) {
-    return order.find(isSession) || order.find((l) => pctLeft(l.percent) > 0) || order[0];
+    return order.find((l) => pctLeft(l.percent) > 0) || order[0];
 }
-
-/// The session row, whatever the endpoint called it. Both shapes parseLimits produces name
-/// it 'Session (5h)' - the array branch from `kind === 'session'`, the object branch from
-/// the `five_hour` key - and shortName already matches the same prefix to turn it into a
-/// countdown, so the prefix is the contract rather than the exact parenthesis.
-function isSession(l) { return /^Session \(/.test(l.name); }
 
 /// The row the status bar number comes from. A focus that no longer exists - the window
 /// reset away, the plan changed, the endpoint stopped reporting it - falls back to the
@@ -1002,20 +988,16 @@ function renderUsage() {
     for (const l of limits)
         md.appendMarkdown('`' + bar(l.percent) + '` **' + (l === shown ? '▸ ' : '') +
             shared.mdText(l.name) + '**: ' + pctLeft(l.percent) + '% left' + resetIn(l.resetsAt) + '  \n');
-    // The second clause is gated on the tightest window actually being SPENT, not merely
-    // on it not being the one shown. It reads as an explanation of the default, and the
-    // default is now the session window rather than the tightest - so "it opens past X"
-    // is true of almost every account, while "which is spent" is true only of some, and
-    // the pair asserted together would be a sentence the meter invents. Where the tightest
-    // window has room, the honest note is which one is tighter than the one on screen.
+    // The default is the tightest window WITH ROOM, so the only way the default can be
+    // anything but the tightest is the tightest being spent - which is what the note says,
+    // and the only thing it says: the meter never asserts spentness of a window that has
+    // room, because that case cannot reach this branch.
     if (limits.length > 1)
         md.appendMarkdown('\n_Click the meter for the next limit' +
             (focus ? ' - it is showing **' + shared.mdText(shown.name) + '**, not the default.'
                 : shown === order[0] ? '.'
-                    : pctLeft(order[0].percent) <= 0
-                        ? ' - it opens past **' + shared.mdText(order[0].name) + '**, which is spent.'
-                        : ' - **' + shared.mdText(order[0].name) + '** is tighter, at ' +
-                            pctLeft(order[0].percent) + '% left.') + '_  \n');
+                    : ' - it opens past **' + shared.mdText(order[0].name) + '**, which is spent.') +
+            '_  \n');
     // One limit is not a cycle. The click used to be wired to it anyway, and stepping
     // through a list of one repainted the identical number - a control that accepts the
     // click and does nothing with it. An account reporting a single window is the ordinary

@@ -147,6 +147,10 @@ function activate(context) {
                 e.affectsConfiguration('chutdown.aiNamesModel'))
                 naming.resetNamer();
             if (e.affectsConfiguration('chutdown.usageKeychain')) keychainSettingChanged();
+            // The bar's density is settled on every render; a new budget deserves one now
+            // rather than at the next poll, so the change can be seen while the setting
+            // is still on screen.
+            if (e.affectsConfiguration('chutdown.statusBarBudget')) lights.renderSessions();
         }));
 
     shared.items.namer = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);

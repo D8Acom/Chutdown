@@ -12,6 +12,7 @@ const net = require('net');
 const shared = require('./shared');
 const platform = require('./platform');
 const claude = require('./claude');
+const density = require('./density');
 // Both file syntaxes - JSON and the original one-per-line - live in their own module.
 const { parseTerminalsFile, sampleJson } = require('./terminals');
 
@@ -142,7 +143,8 @@ function launchEntryRec(e, idx, cwd, port) {
     const label = e.name.split(':')[0].trim() || e.name;
     const item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 900 - idx);
     item.command = { command: 'chutdown.focusTerminal', arguments: [e.name], title: 'Toggle' };
-    shared.paint(item, { text: '🟢 ' + label, tooltip: e.command + '\n(starting - logs appear here)' });
+    shared.paint(item, { text: density.termText('🟢', label),
+                         tooltip: e.command + '\n(starting - logs appear here)' });
     const rec = { name: e.name, label, terminal, item, lines: [], exited: false,
                   ended: false, exitCode: undefined, command: e.command, cwd,
                   port, portUp: undefined };
@@ -348,13 +350,28 @@ function termState(rec) {
 /// only when one of them actually changed (shared.paint). It used to be three writes in
 /// six places, every one of them re-rendering the item and closing whatever hover was
 /// open: the log tail alone repainted the item on every line a dev server printed.
+/// The name is as long as the bar has room for (density.js): whole, cut to a few letters,
+/// or gone altogether on a crowded afternoon - the hover carries it whole whenever the
+/// light does not.
 function refreshTermItem(rec) {
     shared.paint(rec.item, {
-        text: termLight(rec) + ' ' + (rec.label || rec.name),
+        text: density.termText(termLight(rec), rec.label || rec.name),
         backgroundColor: termLight(rec) === '🟠'
             ? new vscode.ThemeColor('statusBarItem.warningBackground') : undefined,
         tooltip: termTooltip(rec)
     });
+}
+
+/// Every batch light, re-written for the current density level. lights.renderSessions
+/// calls this when the level moves, so the batch lights shrink in step with the session
+/// lights rather than at the next event of their own.
+function refreshAllTermItems() {
+    for (const rec of shared.termRecs.values()) refreshTermItem(rec);
+}
+
+/// What the batch lights would say at full size - what density.js budgets for.
+function termLabels() {
+    return [...shared.termRecs.values()].map((r) => r.label || r.name);
 }
 
 /// The truth about a ":port" entry comes from the socket, not from shell events -
@@ -690,6 +707,10 @@ function termTooltip(rec) {
     // of ``` closed the block and everything after it rendered as trusted markdown.
     md.isTrusted = { enabledCommands: ['chutdown.copyTerminalLog'] };
     md.supportThemeIcons = true;
+    // The name leads only while the light is not wearing it whole (a crowded bar cuts it
+    // or drops it - density.js); at full size the light says it already.
+    const label = rec.label || rec.name;
+    if (!density.termNameShown(label)) md.appendMarkdown('**' + shared.mdText(label) + '**  \n');
     md.appendMarkdown('**' + shared.mdText(rec.command) + '**  \n_' + termState(rec) + '_\n');
     md.appendMarkdown(shared.mdCode(rec.lines.slice(-15).join('\n') || '(no output yet)', 'text'));
     // A hover cannot be selected, and a crashed server's last lines are exactly what
@@ -733,5 +754,5 @@ Object.assign(module.exports, {
     startAll, stopAll, restartAll, restartOne, stopOne, findRec,
     updateStopItem, toggleTerminal,
     captureExecution, executionEnded, onTerminalClosed, copyTerminalLog,
-    probePort, termLight, termState, disposeTermItems
+    probePort, termLight, termState, disposeTermItems, refreshAllTermItems, termLabels
 });

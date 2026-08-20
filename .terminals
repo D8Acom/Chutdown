@@ -17,5 +17,15 @@
   "// dev": "npm run dev",
   "// web": { "cmd": "npm run dev", "port": 3000 },
   "// api": { "cmd": "npm run dev", "cwd": "packages/api", "port": 4000 },
-  "// d8a": { "cmd": "npm start", "cwd": "D8A" }
+  "// d8a": { "cmd": "npm start", "cwd": "D8A" },
+
+  "// ---- the test entries below are real, and launch on the button ----": "every one runs test/serve.js - a stand-in dev server, no npm install, no network, ports 39001-39004 chosen to collide with nothing. It prints a line every three seconds so the hover log has something in it, and answers Ctrl+C by printing SIGINT before it goes.",
+  "// what to watch": "four lights go green once the sockets answer; \"oneshot\" ends by itself and its light goes dark; Stop all Ctrl+Cs the lot. \"insub\" is the one that proves cwd is relative to THIS file - it runs inside test/, so its command has no test/ in it.",
+  "// switching them off": "put // in front of a name, like the four examples above. test/serve.js is development-only (test/ is gitignored), so a fresh clone has these entries and not the script they run.",
+
+  "probe:39001": "node test/serve.js 39001",
+
+
+  "// crash": "node test/serve.js --fail",
+  "// claude": "claude"
 }

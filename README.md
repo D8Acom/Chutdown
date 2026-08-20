@@ -60,6 +60,12 @@ read from the transcript's own `stop_reason`, never guessed from silence.*
 Hover to see the task details — the latest output, plus the prompt it started on and the one you last sent; click to jump to it. Initial tasks are renamed based on the initial prompt.*
 [Details →](docs/MANUAL.md#traffic-lights--one-clickable-entry-per-session)
 
+*On a crowded afternoon the bar compacts itself rather than falling off the right edge:
+the launch buttons drop to their letters, then the names shorten, then the lights are just
+lights — the hover keeps the full name. `chutdown.statusBarBudget` sets how much room it
+gets before that starts (0 = never).*
+[Details →](docs/MANUAL.md#when-the-bar-is-full)
+
 <img src="media/screenshots/hover-idle.png" width="703" alt="The idle dropdown's hover: nine idle sessions listed by name with how each ended and how long it has been quiet — click a name to resume it">
 
 *Old sessions turn idle but still redeemable — one click to run again,

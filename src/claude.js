@@ -8,6 +8,7 @@ const shared = require('./shared');
 const lights = require('./lights');
 const identify = require('./identify');
 const usage = require('./usage');
+const density = require('./density');
 
 function trackClaude(terminal, cwd, inEditor, hint) {
     const rec = { terminal, cwd, created: Date.now(), sessionId: '', lastTitle: '',
@@ -247,9 +248,37 @@ function reviveClaudeTabs() {
         t.processId.then((pid) => { rec.pid = pid || 0; }, () => { });
         revived.push({ rec, title: e.title });
     }
+    // After a restart the tabs are empty shells: put the sessions straight back into them
+    // (autoResume, on by default) rather than leaving each one a light-click away.
+    const resumed = dead && shared.cfg().get('autoResume')
+        ? autoResumeRevived(revived.map((x) => x.rec)) : 0;
     shared.nlog('revive: re-bound ' + revived.length + ' claude tab(s) by ' +
-        (bySlot ? 'tab slot' : 'order') + (dead ? ' after a restart' : ''));
+        (bySlot ? 'tab slot' : 'order') + (dead ? ' after a restart' : '') +
+        (resumed ? ' - resumed ' + resumed + ' of them' : ''));
     renameRevivedTabs(revived);
+}
+
+/// A tab revived after a full quit or a reboot wears its session's name but has nothing
+/// running in it - the pty host died with the app, and the shell VS Code relaunched is
+/// a fresh one. This types `claude --resume <id>` into each such tab, which is exactly
+/// what a click on its light would do (showSession), so the session comes back in the
+/// same tab, in the same place, without anyone having to click it. The same rec fields
+/// are set as that click sets: `revived` off so nothing types a second resume over the
+/// top, `resumeId` so bindClaudeTerminals pairs the transcript that starts moving with
+/// THIS tab and not with the oldest unbound terminal in the folder. The shell may still
+/// be initialising on a cold boot; typed-ahead input waits in the pty until it reads.
+/// Returns how many were resumed.
+function autoResumeRevived(recs) {
+    let n = 0;
+    for (const rec of recs) {
+        if (!rec.revived || !vscode.window.terminals.includes(rec.terminal)) continue;
+        if (!safeId(rec.sessionId)) continue;
+        rec.revived = false;
+        rec.resumeId = rec.sessionId;
+        try { rec.terminal.sendText('claude --resume ' + rec.sessionId, true); n++; }
+        catch (e) { shared.nlog('resume: ' + rec.sessionId.slice(0, 8) + ' - ' + e.message); }
+    }
+    return n;
 }
 
 /// Only the ACTIVE terminal can be renamed, so each tab in the list is revealed in turn
@@ -396,6 +425,25 @@ function settleIntoGroup(targetCol, tries) {
 /// "sonnet", "haiku"), each opening a claude terminal pinned to that model. Entries
 /// are "label = model" (or just "model"); edits to the setting rebuild the buttons live.
 const claudeButtons = [];
+const claudeButtonEntries = [];   // {label, model} behind each item, same order
+
+/// The text on a launch button: its letter, and its word while the bar has room for one
+/// (density.js decides - a crowded bar takes the labels off first, they are the one thing
+/// down there whose meaning the mark already carries).
+function buttonText(b) { return density.buttonText(letterIcon(b.model), b.label); }
+
+/// Re-write every button's text for the CURRENT density level, touching nothing else.
+/// lights.renderSessions calls this when the level moves; a rebuild (buildClaudeButtons)
+/// is for a change of which buttons there are.
+function paintClaudeButtons() {
+    for (let i = 0; i < claudeButtons.length; i++) {
+        const text = buttonText(claudeButtonEntries[i]);
+        if (claudeButtons[i].text !== text) claudeButtons[i].text = text;
+    }
+}
+
+/// The words the buttons would wear at full size - what density.js budgets for.
+function buttonLabels() { return claudeButtonEntries.map((b) => b.label); }
 
 /// The models the "Choose Models" picker offers, in BUTTON ORDER - which is also the
 /// order of the editor title letter icons (O / F / S / H). `best` is what the hover
@@ -475,16 +523,18 @@ function buttonsAreDefault() {
 function buildClaudeButtons() {
     for (const it of claudeButtons) it.dispose();
     claudeButtons.length = 0;
+    claudeButtonEntries.length = 0;
     const entries = parseClaudeButtons();
     let prio = 998;
     for (const b of entries) {
         const item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, prio);
         prio -= 0.01;
         item.command = { command: 'chutdown.newClaude', arguments: [b.model], title: 'New' };
-        item.text = letterIcon(b.model) + ' ' + b.label;
+        item.text = buttonText(b);
         item.tooltip = buttonHover(b);
         item.show();
         claudeButtons.push(item);
+        claudeButtonEntries.push(b);
     }
     // The same buttons also sit top-right in the editor title bar as letter icons
     // (package.json editor/title menu, slots 1-4: O/F/S/H, negative navigation order so
@@ -1019,7 +1069,8 @@ function claudeTabClosed(terminal) {
 
 Object.assign(module.exports, {
     trackClaude, activeViewColumn, claudeLocation, settleIntoGroup,
-    claudeButtons, buildClaudeButtons, newClaude, newClaudeSlot, slotEntries, modelLetter, letterIcon,
+    claudeButtons, buildClaudeButtons, paintClaudeButtons, buttonLabels,
+    newClaude, newClaudeSlot, slotEntries, modelLetter, letterIcon,
     pickModels,
     showSession, hasLocalTerminal, revivedTab, savedTabSessions, everBoundHere,
     bindClaudeTerminals, renameActiveClaude, sweepTabTitles, claimTab, manualWord,

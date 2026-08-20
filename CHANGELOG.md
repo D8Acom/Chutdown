@@ -5,7 +5,34 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Added
+- **Sessions come back by themselves after a restart.** A full quit or a reboot kills the pty
+  host, so VS Code brings every claude tab back as an empty shell; Chutdown put the names back
+  on them, and each session was then one click on its light away (`claude --resume` typed
+  into that tab). After a reboot that read as "the tabs are there but nothing was restored" —
+  a row of correctly-named `bash` prompts, and the reason it was designed that way (the click
+  is where the resume lives) is not something a tab tells you. So the click now happens on its
+  own: once the restore has settled and the names are back, every tab revived after a restart
+  gets `claude --resume <id>` typed into it, the same call the light-click makes, with the same
+  bookkeeping (`revived` off so nothing types a second resume over it, `resumeId` set so the
+  transcript that starts moving binds to THIS tab). `chutdown.autoResume`, on by default; off,
+  the old behaviour — names back, click to resume. A plain window reload is untouched: those
+  shells and their claudes survive, and nothing is typed anywhere. The revive log line says
+  how many it resumed.
+
 ### Changed
+- **The usage meter opens on the lowest "% left" again, not the session.** 0.1.2 moved the
+  default to the session window, on the argument that a number whose meaning moved between
+  windows had to be hovered to be read. That argument went away in the same release, when
+  the number became always labelled (`45% 4d` cannot be mistaken for the session) — and what
+  was left was a meter showing a comfortable session while a weekly window ran dry behind it.
+  Owner's ruling: on load the meter shows the limit with the lowest % left that still has
+  room — the window you will hit first — and the click steps on from there as before,
+  tightest-first, spent windows included, wrapping back to the default. A spent (0%) window
+  is still stepped past by default; only when every window is spent does it open on `0%`.
+  The hover's note shrinks to the one case that can now arise (`it opens past X, which is
+  spent`) — the "X is tighter, at N% left" sentence could only be true under a session
+  default and is gone with it.
 - **The sample `.terminals` now tells an agent how to reset a server, in those words.** The
   restart link was in there, but as a single parenthetical at the end of one long note —
   `also /start and /stop, add &name=web for just one` — written for someone who already knew
@@ -216,6 +243,21 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   an editor came back without the file you were halfway through.
 
 ### Added
+- **A crowded status bar compacts itself instead of losing its right-hand end.** A busy
+  afternoon is four launch buttons, a dozen session lights and three dev servers, and VS Code
+  drops whatever does not fit — rightmost first, which is the idle entry, the usage meter and
+  the batch lights. The three things that grow now shrink together, in steps, once they are
+  estimated to pass a budget: the launch buttons drop their words and keep their letters
+  (`O opus` → `O`), then the session and terminal names are cut to 8 and then 5 characters
+  with an ellipsis, then the session lights become bare traffic lights, and finally the batch
+  terminal lights do too. Whatever a light stops saying, its hover says in full — a cut or
+  dropped name leads the hover in bold. The level is settled once per poll before any light
+  is painted, so a render never shows two levels at once and the buttons and batch lights
+  move in the same poll as the session lights; it steps back up as the crowd thins. New
+  setting `chutdown.statusBarBudget` (default 120, roughly characters — the bar's real width
+  is not readable from the extension API, so it is an estimate): raise it on a wide screen,
+  lower it on a laptop, 0 never compacts. Lives in `src/density.js`; every painter asks it
+  for its text rather than building its own.
 - **A rule about what a platform is allowed to offer**, written down in the manual next to
   the platform table because it is now a design principle rather than a preference:
   *Chutdown never offers a control it cannot honour.* A control that cannot act on the OS

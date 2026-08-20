@@ -8,6 +8,7 @@ const claude = require('./claude');
 const batch = require('./batch');
 const scan = require('./scan');
 const naming = require('./naming');
+const density = require('./density');
 
 const sessionItems = new Map(); // sessionId -> its own status bar traffic light
 // Session lights sit between the .terminals/stop buttons above them and the idle
@@ -405,6 +406,7 @@ function renderSessions() {
         if (!shared.sessions.has(id)) { item.dispose(); sessionItems.delete(id); releasePrio(id); }
 
     const stale = [];
+    const lit = [];                 // {s, item} - the sessions that get a light this render
     const list = [...shared.sessions.values()].sort((a, b) => a.firstSeen - b.firstSeen);
     for (const s of list) {
         let item = sessionItems.get(s.id);
@@ -453,6 +455,22 @@ function renderSessions() {
             item.command = { command: 'chutdown.showSession', arguments: [s.id], title: 'Show' };
             sessionItems.set(s.id, item);
         }
+        lit.push({ s, item });
+    }
+
+    // Everything that will be on the bar is now known, so this is where the bar's density
+    // is settled - BEFORE any light is written, so a render never paints half its lights
+    // at one level and half at the next. When the level moves, the buttons and the batch
+    // lights (painted elsewhere, on their own events) are re-written here and now, so all
+    // three surfaces shrink in the same poll.
+    const moved = density.recompute({
+        buttons: claude.buttonLabels(),
+        sessions: lit.map((x) => x.s.name),
+        terms: batch.termLabels()
+    });
+    if (moved) { claude.paintClaudeButtons(); batch.refreshAllTermItems(); }
+
+    for (const { s, item } of lit) {
         const { e, label, local } = resolve(s);
         const md = new vscode.MarkdownString();
         md.isTrusted = { enabledCommands: HOVER_COMMANDS };   // the Close/Copy links below
@@ -462,7 +480,11 @@ function renderSessions() {
         // poll, and a hover whose text changes is a hover VS Code closes - so the one
         // number nobody needs to the second was enough to make every light's hover
         // twitch shut while it was being read (shared.js).
-        md.appendMarkdown(e + ' **' + label + '** - quiet ' + shared.coarse(shared.quiet(s)) + '  \n');
+        // The name joins the first line only while the light is not wearing it whole (a
+        // crowded bar cuts it short or drops it - density.js): the hover is then the one
+        // place it can be read.
+        const named = density.sessionNameShown(s.name) ? '' : '**' + shared.mdText(s.name) + '** - ';
+        md.appendMarkdown(e + ' ' + named + '**' + label + '** - quiet ' + shared.coarse(shared.quiet(s)) + '  \n');
         // The prompts and the answer are the user's and Claude's text, not ours - escaped
         // rather than pasted into markdown that the hover trusts (shared.js).
         if (s.lastText) md.appendMarkdown('\n' + shared.mdCode(s.lastText, 'text'));
@@ -471,7 +493,7 @@ function renderSessions() {
             : '\n_Click to resume it in a terminal here_  \n');
         md.appendMarkdown(copyLink(s.id) + ' · ' + renameLink(s.id) + ' · ' + transcriptLink(s) +
             (local ? '' : ' · ' + closeLinks(s.id)));
-        shared.paint(item, { text: e + ' ' + s.name, tooltip: md });
+        shared.paint(item, { text: density.sessionText(e, s.name), tooltip: md });
     }
 
     renderStale(stale);

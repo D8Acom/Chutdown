@@ -168,6 +168,11 @@
           "default": true,
           "description": "Also show the model launch buttons top-right in the editor title bar, leftmost in that row (first four claudeButtons entries: O / F / S / H letter icons in entry order)."
         },
+        "chutdown.statusBarBudget": {
+          "type": "number",
+          "default": 120,
+          "description": "How much room (roughly, in characters) the launch buttons, session lights and batch terminal lights may take in the status bar before they start to compact. Over it they shrink in steps, all three together: the launch buttons drop their words and keep their letters (O, F, S, H), then the session and terminal names are cut to 8 and then 5 characters, then the session lights become bare traffic lights, and finally the terminal lights do too. Whatever a light stops saying, its hover still says in full. The bar's real width cannot be read, so this is an estimate — raise it on a wide screen, lower it on a laptop. 0 = never compact; 1 = always as compact as it gets."
+        },
         "chutdown.aiNames": {
           "type": "boolean",
           "default": true,
@@ -187,6 +192,11 @@
           "type": "boolean",
           "default": true,
           "description": "When a window loads, put the session names back on every claude tab it finds - the ones VS Code restored as plain 'claude' after a quit, the ones a reload reconnected, and the ones already running claude before the window opened. Only the active tab can be renamed, so the tabs are flicked through once at startup; focus is not taken. Run it again any time with 'Chutdown: Put Session Names Back On The Tabs'."
+        },
+        "chutdown.autoResume": {
+          "type": "boolean",
+          "default": true,
+          "description": "After VS Code is quit or the machine is restarted, the claude tabs come back as empty shells wearing their session names. With this on, each one is resumed automatically once the window has restored its tabs - 'claude --resume <id>' is typed into that same tab, so the sessions come back where they were. Off: the tabs keep their names and a click on a session's light resumes it into its tab. Needs restoreTabNames; a plain window reload is not affected (those shells survive)."
         },
         "chutdown.identifyTabs": {
           "type": "boolean",
