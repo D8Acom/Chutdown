@@ -3,6 +3,31 @@
 All notable changes to Chutdown are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.4] - 2026-08-21
+
+### Fixed
+- **The restart resume goes into a fresh terminal, not the restored shell.** 0.1.3 typed
+  `claude --resume <id>` into the tab VS Code brought back after a reboot. What the workbench
+  relaunches in that tab is whatever it has to hand at the moment: on a slow cold boot its
+  profile detection had not found Git Bash yet, so the tab came up in Windows PowerShell —
+  with the environment saved before the quit, not today's — and the resume came back as
+  `claude : The term 'claude' is not recognized`. So the restored shell is now closed and the
+  session reopened in a terminal of Chutdown's own in its place, with every setting a claude
+  tab gets: born wearing its session title (no rename flick needed), the model letter on the
+  icon, the session's folder, a fresh environment, the title-stomp guard, and the resume typed
+  into *that*. A panel tab is opened as a split of the dead one so it keeps its slot in the
+  row; an editor-area tab goes to the active column, as a light-click's resume does. The rec
+  is bound on the spot, so the light sees a live tab from the first tick. A tab that cannot be
+  reopened is resumed in place the old way. The revive log now says how many went into fresh
+  terminals. `autoResume` off is unchanged: names back in place, click to resume.
+- **A restored tab you already typed into is yours.** The extension loads late on a cold
+  boot, and nobody waits at an empty prompt for it — you type your own `claude --resume`, a
+  `cd`, anything. Such a tab (the workbench's `isInteractedWith`, or any command shell
+  integration saw start in it) is now not paired, not renamed, never closed and never typed
+  into — by the revive, the auto-resume, or a later click on the session's light, which opens
+  a fresh terminal instead of typing over you. Your own `claude --resume` there is adopted
+  like any hand-started claude. Log: `revive: 1 restored tab(s) already in use - left alone`.
+
 ## [0.1.3] - 2026-08-20
 
 ### Added

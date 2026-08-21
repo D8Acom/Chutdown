@@ -136,12 +136,28 @@ slots are lined up with the restored tabs and the names go back on by position
 (`restoreTabNames`, on by default). A session that has aged out of
 `lookbackHours` gets the exact title it wore at quit time. Those tabs are empty shells — the
 pty host died with the app, and what VS Code relaunched is a fresh shell — so once the tabs
-have settled each one is **resumed automatically**: `claude --resume <id>` is typed into
-that same tab, and the sessions come back where they were (`autoResume`, on by default; the
-log line reads `revive: re-bound 3 claude tab(s) by tab slot after a restart - resumed 3 of
-them`). With `autoResume` off the tabs keep their names and clicking a session's light
-resumes it **into its tab** rather than opening a second one beside it. A plain window
-reload never resumes anything: those shells survive, and their claudes with them.
+have settled each session is **resumed automatically** (`autoResume`, on by default). Not
+into that restored shell, though: what the workbench relaunched there is whatever it had to
+hand at that moment — on a slow cold boot its profile detection may not have found your
+default shell yet, so the tab comes up in the OS fallback (Windows PowerShell on a Git Bash
+machine), running with the environment saved before the quit rather than today's — and a
+`claude --resume` typed into that came back as `claude : The term 'claude' is not
+recognized`. So the restored shell is **closed and the session reopened in a terminal of
+Chutdown's own in its place**, with everything a claude tab gets: born wearing its session
+title (no rename flick), the model letter on the icon, the session's folder, a fresh
+environment, and `claude --resume <id>` typed into *that*. A panel tab is opened as a split
+of the dead one so it keeps its slot in the row; an editor-area tab goes to the active
+column. The log line reads `revive: re-bound 3 claude tab(s) by tab slot after a restart -
+resumed 3 of them (3 in fresh terminals)`; a tab that could not be reopened is resumed in
+place the old way. **A restored tab you have already typed into, or run something in, is
+yours**: the extension loads late on a cold boot and nobody waits at an empty prompt for it,
+so such a tab is not paired, not renamed, never closed and never typed into (`revive: 1
+restored tab(s) already in use - left alone`) — your own `claude --resume` there is adopted
+like any hand-started claude, and a light-click on that session opens a fresh terminal
+rather than typing over you. With `autoResume` off the tabs keep their names and clicking a
+session's light resumes it **into its tab** rather than opening a second one beside it
+(unless you have typed into it since — then a fresh one). A plain window reload never
+resumes anything: those shells survive, and their claudes with them.
 
 **Every tab is named at startup, not just the one in front.** Only the *active* terminal can
 be renamed — the workbench has no "rename that other tab" command — so once everything that

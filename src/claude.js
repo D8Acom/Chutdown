@@ -238,31 +238,118 @@ function reviveClaudeTabs() {
         for (let i = 0; i < Math.min(entries.length, loose.length); i++)
             pairs.push({ e: entries[i], t: loose[i] });
     }
+    // A cold boot loads the extension late, and a person left at an empty prompt does
+    // not wait for it: a restored tab the user has already typed into, or run something
+    // in, is THEIR tab now - not paired, not renamed, never closed or typed into. Their
+    // own `claude --resume` in it is adopted by adoptClaude like any hand-started claude.
+    let busy = 0;
+    if (dead) {
+        const n = pairs.length;
+        pairs = pairs.filter((p) => !userTouched(p.t));
+        busy = n - pairs.length;
+        if (busy) shared.nlog('revive: ' + busy + ' restored tab(s) already in use - left alone');
+    }
     if (!pairs.length) return;
-    const revived = [];
+    // After a restart the tabs are empty shells: put the sessions straight back
+    // (autoResume, on by default) rather than leaving each one a light-click away - and
+    // not INTO those shells but into fresh terminals of our own in their place; see
+    // reopenRevivedTab for why the restored shell is not worth typing into.
+    const reopen = dead && shared.cfg().get('autoResume');
+    const revived = [], inPlace = [], rename = [];
+    let reopened = 0;
     for (const { e, t } of pairs) {
+        if (reopen) {
+            const fresh = reopenRevivedTab(e, t);
+            if (fresh) { reopened++; revived.push({ rec: fresh, title: e.title }); continue; }
+        }
         const rec = { terminal: t, cwd: e.cwd, created: e.created, sessionId: e.sessionId,
             lastTitle: '', inEditor: e.inEditor, pid: 0, resumeId: '', continueFlag: false,
             revived: dead };
         shared.claudeRecs.push(rec);
         t.processId.then((pid) => { rec.pid = pid || 0; }, () => { });
         revived.push({ rec, title: e.title });
+        rename.push({ rec, title: e.title });
+        if (reopen) inPlace.push(rec);      // could not be reopened: resume in place instead
     }
-    // After a restart the tabs are empty shells: put the sessions straight back into them
-    // (autoResume, on by default) rather than leaving each one a light-click away.
-    const resumed = dead && shared.cfg().get('autoResume')
-        ? autoResumeRevived(revived.map((x) => x.rec)) : 0;
+    const resumed = reopened + (inPlace.length ? autoResumeRevived(inPlace) : 0);
     shared.nlog('revive: re-bound ' + revived.length + ' claude tab(s) by ' +
         (bySlot ? 'tab slot' : 'order') + (dead ? ' after a restart' : '') +
-        (resumed ? ' - resumed ' + resumed + ' of them' : ''));
-    renameRevivedTabs(revived);
+        (resumed ? ' - resumed ' + resumed + ' of them' +
+            (reopened ? ' (' + reopened + ' in fresh terminals)' : '') : ''));
+    // A reopened tab was born wearing its title; only the ones left in place need the flick.
+    if (rename.length) renameRevivedTabs(rename);
+}
+
+/// After a full quit or a reboot the tab VS Code brings back is nothing we want to type
+/// into. The pty host died with the app, and what the workbench relaunched in the tab
+/// is whatever it had to hand at that moment: on a slow cold boot its profile detection
+/// may not have found the configured default yet, so the tab comes up in the OS
+/// fallback shell (Windows PowerShell on a Git Bash machine), and a revived process is
+/// relaunched with the environment saved before the quit, not today's. A `claude
+/// --resume` typed into that is `claude : The term 'claude' is not recognized` in a
+/// shell the user never chose - which is exactly what a reboot produced. So the restored
+/// shell is closed and the session reopened in a terminal of our own, with every setting
+/// a claude tab ever gets: the session's title as its NAME (no rename flick needed - it is
+/// born wearing it), the model letter on the icon, the session's cwd, a fresh
+/// environment, and the title-stomp guard. A panel tab is created as a SPLIT of the dead
+/// tab, so that when the dead one goes the replacement is left standing in its slot
+/// rather than at the end of the row; an editor-area tab goes to the active column, as
+/// a light-click's resume does. The rec is bound to the session on the spot (the id is
+/// known - it is what was saved), so the light, the hover and the title sweep all see
+/// a live tab from the first tick. Returns the rec, or null if no terminal could be
+/// opened - the caller then resumes into the restored shell the old way.
+/// Has the user already got to this restored tab - typed into it, or run something in
+/// it - before the revive reached it? `state.isInteractedWith` is the workbench's own
+/// "the user has typed here" flag (our sendText does not set it, and it is false for
+/// every tab a window restores); the set is belt and braces for a shell whose
+/// integration reported a command starting, which is the same fact by another route.
+const touchedTerms = new WeakSet();
+function userTouched(t) {
+    try { if (t.state && t.state.isInteractedWith) return true; } catch { /* no state */ }
+    return touchedTerms.has(t);
+}
+
+function reopenRevivedTab(e, t) {
+    if (!safeId(e.sessionId)) return null;
+    const s = shared.sessions.get(e.sessionId);
+    const name = s && s.name ? lights.lightFor(s).e + ' ' + s.name : (e.title || 'claude');
+    const cwd = e.cwd || shared.firstRoot();
+    const inEditor = !!e.inEditor;
+    const wasActive = vscode.window.activeTerminal === t;
+    let terminal;
+    try {
+        terminal = vscode.window.createTerminal({
+            name,
+            cwd,
+            iconPath: shared.claudeIcon(modelLetter(s && s.model)),
+            location: inEditor ? { viewColumn: activeViewColumn() } : { parentTerminal: t },
+            env: { CLAUDE_CODE_DISABLE_TERMINAL_TITLE: '1' }
+        });
+    } catch (err) {
+        shared.nlog('revive: could not reopen ' + e.sessionId.slice(0, 8) + ' - ' +
+            (err && err.message ? err.message : err) + ' - resuming in place');
+        return null;
+    }
+    try { t.dispose(); } catch { /* already gone */ }
+    const rec = { terminal, cwd, created: e.created, sessionId: e.sessionId, lastTitle: name,
+        inEditor, pid: 0, resumeId: e.sessionId, continueFlag: false, revived: false };
+    shared.claudeRecs.push(rec);
+    terminal.processId.then((pid) => { rec.pid = pid || 0; saveBindings(); }, () => { });
+    // The tab the window came back looking at stays the one in front - its replacement,
+    // now. Focus is not taken.
+    if (wasActive) { try { terminal.show(true); } catch { } }
+    try { terminal.sendText('claude --resume ' + e.sessionId, true); }
+    catch (err) { shared.nlog('resume: ' + e.sessionId.slice(0, 8) + ' - ' + err.message); }
+    return rec;
 }
 
 /// A tab revived after a full quit or a reboot wears its session's name but has nothing
 /// running in it - the pty host died with the app, and the shell VS Code relaunched is
 /// a fresh one. This types `claude --resume <id>` into each such tab, which is exactly
 /// what a click on its light would do (showSession), so the session comes back in the
-/// same tab, in the same place, without anyone having to click it. The same rec fields
+/// same tab, in the same place, without anyone having to click it. It is the FALLBACK
+/// now - reopenRevivedTab replaces the restored shell with a terminal of our own, and
+/// only a tab it could not reopen is resumed in place like this. The same rec fields
 /// are set as that click sets: `revived` off so nothing types a second resume over the
 /// top, `resumeId` so bindClaudeTerminals pairs the transcript that starts moving with
 /// THIS tab and not with the oldest unbound terminal in the folder. The shell may still
@@ -743,6 +830,16 @@ async function showSession(id) {
         if (loose.length === 1) { rec = loose[0]; rec.sessionId = id; }
     }
     if (rec) {
+        // ...unless the user has since typed into that empty shell, or run something in
+        // it: it is their tab now, never to be typed over. The binding is dropped and
+        // the session gets a fresh terminal, as a session with no tab here would.
+        if (rec.revived && userTouched(rec.terminal)) {
+            shared.nlog('resume: ' + id.slice(0, 8) + ' - its restored tab is in use, opening a fresh one');
+            const i = shared.claudeRecs.indexOf(rec);
+            if (i >= 0) shared.claudeRecs.splice(i, 1);
+            resumeSession(s);
+            return;
+        }
         revealTerminal(rec);
         // A tab restored from a quit is an empty shell still wearing the session's
         // name - nothing is running in it, so put the session back INTO that tab
@@ -1030,6 +1127,7 @@ function renameActiveClaude() {
 /// the same tab rename + click-to-focus as extension-created claude terminals.
 function adoptClaude(e) {
     try {
+        touchedTerms.add(e.terminal);     // whatever ran, this tab is in use - see userTouched
         const cmd = (e.execution.commandLine && e.execution.commandLine.value) || '';
         // Anything running in a restored tab means it is NOT an empty shell any more,
         // so a later click must not type a resume command over the top of it.
