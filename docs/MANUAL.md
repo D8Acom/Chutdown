@@ -145,7 +145,13 @@ machine), running with the environment saved before the quit rather than today's
 recognized`. So the restored shell is **closed and the session reopened in a terminal of
 Chutdown's own in its place**, with everything a claude tab gets: born wearing its session
 title (no rename flick), the model letter on the icon, the session's folder, a fresh
-environment, and `claude --resume <id>` typed into *that*. A panel tab is opened as a split
+environment, and `claude --resume <id>` typed into *that*. It is started in **the shell your
+own settings name** — `terminal.integrated.defaultProfile.<os>` read and resolved by
+Chutdown (a `path` profile as written; the built-in "Git Bash" looked up where VS Code
+looks) rather than left to the workbench's detection, which is what was not ready; where
+that cannot be read (no default set, a PowerShell or WSL source) the workbench's default
+applies as for any terminal (`revive: reopening in C:\Program Files\Git\bin\bash.exe`). A
+panel tab is opened as a split
 of the dead one so it keeps its slot in the row; an editor-area tab goes to the active
 column. The log line reads `revive: re-bound 3 claude tab(s) by tab slot after a restart -
 resumed 3 of them (3 in fresh terminals)`; a tab that could not be reopened is resumed in

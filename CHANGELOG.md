@@ -15,7 +15,11 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   session reopened in a terminal of Chutdown's own in its place, with every setting a claude
   tab gets: born wearing its session title (no rename flick needed), the model letter on the
   icon, the session's folder, a fresh environment, the title-stomp guard, and the resume typed
-  into *that*. A panel tab is opened as a split of the dead one so it keeps its slot in the
+  into *that* — started in the shell the user's own settings name
+  (`terminal.integrated.defaultProfile.<os>`, read and resolved by Chutdown: a `path` profile
+  as written, the built-in "Git Bash" looked up where VS Code looks) rather than left to the
+  workbench's detection, which is what was not ready; where that cannot be read the workbench
+  default applies as before. A panel tab is opened as a split of the dead one so it keeps its slot in the
   row; an editor-area tab goes to the active column, as a light-click's resume does. The rec
   is bound on the spot, so the light sees a live tab from the first tick. A tab that cannot be
   reopened is resumed in place the old way. The revive log now says how many went into fresh

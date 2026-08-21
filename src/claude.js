@@ -255,11 +255,14 @@ function reviveClaudeTabs() {
     // not INTO those shells but into fresh terminals of our own in their place; see
     // reopenRevivedTab for why the restored shell is not worth typing into.
     const reopen = dead && shared.cfg().get('autoResume');
+    // ...in the shell the user's settings name, read once for the lot.
+    const sh = reopen ? preferredShell() : null;
+    if (reopen) shared.nlog('revive: reopening in ' + (sh ? sh.shellPath : 'the default profile'));
     const revived = [], inPlace = [], rename = [];
     let reopened = 0;
     for (const { e, t } of pairs) {
         if (reopen) {
-            const fresh = reopenRevivedTab(e, t);
+            const fresh = reopenRevivedTab(e, t, sh);
             if (fresh) { reopened++; revived.push({ rec: fresh, title: e.title }); continue; }
         }
         const rec = { terminal: t, cwd: e.cwd, created: e.created, sessionId: e.sessionId,
@@ -309,7 +312,58 @@ function userTouched(t) {
     return touchedTerms.has(t);
 }
 
-function reopenRevivedTab(e, t) {
+/// The shell the user has told VS Code to open terminals in, read from THEIR settings
+/// (`terminal.integrated.defaultProfile.<os>` and the matching `profiles.<os>` entry)
+/// and resolved here - so a reopened tab is started in that shell directly, rather than
+/// through the workbench's default-profile resolution, which on a slow cold boot may
+/// not have detected that shell yet and quietly substitutes the OS fallback (Windows
+/// PowerShell): the very thing the reopen exists to get away from. A `path` profile is
+/// used as written (first path that exists, `${env:X}` expanded, its args and env
+/// carried); the built-in "Git Bash" source is looked up where VS Code itself looks,
+/// with the args VS Code gives it. Anything else - no default set, a PowerShell or WSL
+/// source, a path that is not there - answers null, and the terminal is left to the
+/// workbench's default as before: guessing wrong here would open the session in a shell
+/// the user never chose, which is the bug, not a fix for it. Pure given `opts`
+/// (cfg/os/env/exists), which is how the smoke test pins it from any machine.
+const GIT_BASH_PATHS = [
+    '${env:ProgramW6432}\\Git\\bin\\bash.exe', '${env:ProgramW6432}\\Git\\usr\\bin\\bash.exe',
+    '${env:ProgramFiles}\\Git\\bin\\bash.exe', '${env:ProgramFiles}\\Git\\usr\\bin\\bash.exe',
+    '${env:LocalAppData}\\Programs\\Git\\bin\\bash.exe',
+    '${env:UserProfile}\\scoop\\apps\\git\\current\\bin\\bash.exe',
+    '${env:AllUsersProfile}\\scoop\\apps\\git\\current\\bin\\bash.exe'
+];
+const PROFILE_OS = { win32: 'windows', darwin: 'osx' }[process.platform] || 'linux';
+function preferredShell(opts) {
+    const o = opts || {};
+    const cfg = o.cfg || vscode.workspace.getConfiguration('terminal.integrated');
+    const os = o.os || PROFILE_OS;
+    const env = o.env || process.env;
+    const exists = o.exists || ((p) => { try { return require('fs').statSync(p).isFile(); } catch { return false; } });
+    const name = cfg.get('defaultProfile.' + os);
+    if (!name || typeof name !== 'string') return null;
+    const profiles = cfg.get('profiles.' + os) || {};
+    const p = profiles[name];
+    // Only ${env:X} is expanded: a path still holding a ${...} after that is one we
+    // cannot resolve, and is skipped rather than statted as written.
+    const subst = (s) => String(s).replace(/\$\{env:([^}]+)\}/g, (_, k) => env[k] || '');
+    const pick = (paths) => [].concat(paths || []).map(subst)
+        .find((x) => x && !/\$\{/.test(x) && exists(x));
+    if (p && p.path) {
+        const path = pick(p.path);
+        if (!path) return null;
+        const sh = { shellPath: path, shellArgs: [].concat(p.args || []).map(subst) };
+        if (p.env && typeof p.env === 'object') sh.env = p.env;
+        return sh;
+    }
+    const source = p && typeof p.source === 'string' ? p.source : (p ? '' : name);
+    if (os === 'windows' && source === 'Git Bash') {
+        const path = pick(GIT_BASH_PATHS);
+        return path ? { shellPath: path, shellArgs: ['--login', '-i'] } : null;
+    }
+    return null;
+}
+
+function reopenRevivedTab(e, t, sh) {
     if (!safeId(e.sessionId)) return null;
     const s = shared.sessions.get(e.sessionId);
     const name = s && s.name ? lights.lightFor(s).e + ' ' + s.name : (e.title || 'claude');
@@ -318,13 +372,17 @@ function reopenRevivedTab(e, t) {
     const wasActive = vscode.window.activeTerminal === t;
     let terminal;
     try {
-        terminal = vscode.window.createTerminal({
+        const opts = {
             name,
             cwd,
             iconPath: shared.claudeIcon(modelLetter(s && s.model)),
             location: inEditor ? { viewColumn: activeViewColumn() } : { parentTerminal: t },
-            env: { CLAUDE_CODE_DISABLE_TERMINAL_TITLE: '1' }
-        });
+            env: Object.assign({}, sh && sh.env, { CLAUDE_CODE_DISABLE_TERMINAL_TITLE: '1' })
+        };
+        // The user's own default shell, started directly (preferredShell) - or, where
+        // that could not be read, the workbench's default profile as for any terminal.
+        if (sh && sh.shellPath) { opts.shellPath = sh.shellPath; opts.shellArgs = sh.shellArgs; }
+        terminal = vscode.window.createTerminal(opts);
     } catch (err) {
         shared.nlog('revive: could not reopen ' + e.sessionId.slice(0, 8) + ' - ' +
             (err && err.message ? err.message : err) + ' - resuming in place');
@@ -1172,6 +1230,6 @@ Object.assign(module.exports, {
     pickModels,
     showSession, hasLocalTerminal, revivedTab, savedTabSessions, everBoundHere,
     bindClaudeTerminals, renameActiveClaude, sweepTabTitles, claimTab, manualWord,
-    adoptClaude, claudeTabClosed, saveBindings, restoreBinding, loadPendingBindings,
+    adoptClaude, claudeTabClosed, saveBindings, restoreBinding, loadPendingBindings, preferredShell,
     reviveClaudeTabs   // exported for the smoke test; the timer in loadPendingBindings runs it
 });

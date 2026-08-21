@@ -196,7 +196,7 @@
         "chutdown.autoResume": {
           "type": "boolean",
           "default": true,
-          "description": "After VS Code is quit or the machine is restarted, the claude tabs come back as empty shells wearing their session names. With this on, each session is resumed automatically once the window has restored its tabs: the restored shell (whatever profile and environment VS Code relaunched it with - on a slow cold boot not always yours) is closed and the session reopened in a fresh terminal in its place, named, with its folder, and 'claude --resume <id>' typed into it. A restored tab you have already typed into is left alone. Off: the tabs keep their names and a click on a session's light resumes it into its tab. Needs restoreTabNames; a plain window reload is not affected (those shells survive)."
+          "description": "After VS Code is quit or the machine is restarted, the claude tabs come back as empty shells wearing their session names. With this on, each session is resumed automatically once the window has restored its tabs: the restored shell (whatever profile and environment VS Code relaunched it with - on a slow cold boot not always yours) is closed and the session reopened in a fresh terminal in its place - in the shell your terminal.integrated.defaultProfile names, named, with its folder - and 'claude --resume <id>' typed into it. A restored tab you have already typed into is left alone. Off: the tabs keep their names and a click on a session's light resumes it into its tab. Needs restoreTabNames; a plain window reload is not affected (those shells survive)."
         },
         "chutdown.identifyTabs": {
           "type": "boolean",
