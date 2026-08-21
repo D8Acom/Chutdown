@@ -3,6 +3,21 @@
 All notable changes to Chutdown are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.5] - 2026-08-21
+
+### Fixed
+- **A claude that was never spoken to is not "resumed" after a restart.** Claude Code writes
+  a session's transcript on its first message, not at launch — so a claude opened and left at
+  its prompt has a session id (its pid file names it, and that is what the bindings saved) but
+  no file, and the restart resume typed `claude --resume <id>` into its tab only to get
+  `No conversation found with session ID: …` and a dead shell. Both restart paths (the fresh
+  terminal and the in-place fallback) now check for the transcript on disk first — under the
+  session's own folder, then any project folder — and a session without one gets a plain
+  `claude` instead, its rec left unbound so the new transcript pairs with the tab like any
+  fresh claude tab (`revive: 8ab65b76 has no transcript on disk (a claude that was never spoken
+  to) - opening a fresh claude in its place rather than resuming it`). A light-click is
+  unaffected: it resumes a session the scan read from its file.
+
 ## [0.1.4] - 2026-08-21
 
 ### Fixed

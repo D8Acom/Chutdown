@@ -2,7 +2,7 @@
   "name": "chutdown",
   "displayName": "Chutdown",
   "description": "Claude session traffic lights in the status bar, batch terminal launching from a .terminals file, and an armable auto-shutdown when every session finishes.",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "license": "MIT",
   "publisher": "d8a",
   "repository": { "type": "git", "url": "https://github.com/D8Acom/Chutdown.git" },

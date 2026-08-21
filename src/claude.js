@@ -396,7 +396,10 @@ function reopenRevivedTab(e, t, sh) {
     // The tab the window came back looking at stays the one in front - its replacement,
     // now. Focus is not taken.
     if (wasActive) { try { terminal.show(true); } catch { } }
-    try { terminal.sendText('claude --resume ' + e.sessionId, true); }
+    // A session with no transcript (never spoken to) gets a plain `claude` and an unbound
+    // rec instead - resuming it would only print "No conversation found" into the tab.
+    const cmd = reviveCommand(rec, e.sessionId, cwd);
+    try { terminal.sendText(cmd, true); }
     catch (err) { shared.nlog('resume: ' + e.sessionId.slice(0, 8) + ' - ' + err.message); }
     return rec;
 }
@@ -418,10 +421,14 @@ function autoResumeRevived(recs) {
     for (const rec of recs) {
         if (!rec.revived || !vscode.window.terminals.includes(rec.terminal)) continue;
         if (!safeId(rec.sessionId)) continue;
+        const id = rec.sessionId;
         rec.revived = false;
-        rec.resumeId = rec.sessionId;
-        try { rec.terminal.sendText('claude --resume ' + rec.sessionId, true); n++; }
-        catch (e) { shared.nlog('resume: ' + rec.sessionId.slice(0, 8) + ' - ' + e.message); }
+        rec.resumeId = id;
+        // ...or a plain `claude` (rec unbound) when the session has no transcript to
+        // resume - see reviveCommand.
+        const cmd = reviveCommand(rec, id, rec.cwd);
+        try { rec.terminal.sendText(cmd, true); n++; }
+        catch (e) { shared.nlog('resume: ' + id.slice(0, 8) + ' - ' + e.message); }
     }
     return n;
 }
@@ -839,6 +846,42 @@ function safeId(id) {
     if (/^[A-Za-z0-9-]{4,}$/.test(String(id || ''))) return true;
     shared.nlog('resume: "' + id + '" is not a session id - not resuming');
     return false;
+}
+
+/// Is there a transcript for this session on disk? Claude Code writes
+/// `~/.claude/projects/<cwd flattened>/<id>.jsonl` on the FIRST message, not at launch:
+/// a claude opened and left at its prompt has a session id (its pid file names it, and
+/// that is what the bindings saved) but no file, and `claude --resume <id>` on it comes
+/// back as `No conversation found with session ID: ...` in a tab that then just sits
+/// there. Looked for under the session's own folder first (the name claude derives
+/// from the cwd - case-insensitively on the platforms where that matters), then under
+/// every project folder, because a session can be resumed from a different folder and
+/// the bindings hold the TAB's cwd: one stat per folder, once per revived tab. Only the
+/// restart paths ask - a light-click resumes a session the scan read from its file.
+function transcriptOnDisk(id, cwd) {
+    if (!safeId(id)) return false;
+    const fs = require('fs'), path = require('path');
+    const file = id + '.jsonl';
+    const isFile = (p) => { try { return fs.statSync(p).isFile(); } catch { return false; } };
+    const own = String(cwd || '').replace(/[^a-zA-Z0-9]/g, '-');
+    if (own && isFile(path.join(shared.PROJECTS, own, file))) return true;
+    let dirs = [];
+    try { dirs = fs.readdirSync(shared.PROJECTS, { withFileTypes: true }); } catch { return false; }
+    return dirs.some((d) => d.isDirectory() && isFile(path.join(shared.PROJECTS, d.name, file)));
+}
+
+/// The command a revived tab gets - `claude --resume <id>` when the session has a
+/// transcript to come back to, a plain `claude` when it never got one (see
+/// transcriptOnDisk): the tab held an idle claude, so an idle claude is what comes back,
+/// and the rec is left UNBOUND (no sessionId, no resumeId) so bindClaudeTerminals pairs
+/// it with the new transcript that appears in its folder like any fresh claude tab.
+function reviveCommand(rec, id, cwd) {
+    if (transcriptOnDisk(id, cwd)) return 'claude --resume ' + id;
+    shared.nlog('revive: ' + String(id).slice(0, 8) + ' has no transcript on disk (a claude that was ' +
+        'never spoken to) - opening a fresh claude in its place rather than resuming it');
+    rec.sessionId = '';
+    rec.resumeId = '';
+    return 'claude';
 }
 
 function resumeSession(s) {

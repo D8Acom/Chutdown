@@ -155,7 +155,12 @@ panel tab is opened as a split
 of the dead one so it keeps its slot in the row; an editor-area tab goes to the active
 column. The log line reads `revive: re-bound 3 claude tab(s) by tab slot after a restart -
 resumed 3 of them (3 in fresh terminals)`; a tab that could not be reopened is resumed in
-place the old way. **A restored tab you have already typed into, or run something in, is
+place the old way. A claude you opened and never spoke to has a session id but no transcript
+(Claude Code writes the file on the first message), and `claude --resume` on it only answers
+`No conversation found` — so such a tab gets a plain `claude` instead, paired with the new
+transcript like any fresh tab (`revive: 8ab65b76 has no transcript on disk (a claude that was
+never spoken to) - opening a fresh claude in its place rather than resuming it`). **A restored
+tab you have already typed into, or run something in, is
 yours**: the extension loads late on a cold boot and nobody waits at an empty prompt for it,
 so such a tab is not paired, not renamed, never closed and never typed into (`revive: 1
 restored tab(s) already in use - left alone`) — your own `claude --resume` there is adopted
