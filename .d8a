@@ -1,0 +1,21 @@
+# .d8a — who governs this repository, and how to run it.
+#
+# Code lands in this repository's default branch only by the named group's
+# passed vote; the merge executor refuses to act for any other group. Delete
+# this file to withdraw consent. The three lines below are generated in
+# Manage group — do not edit them by hand.
+version: 1
+group: d8a:chutdown
+proof: D8lKxFuQbxRMUdspj6YtCo9NeXQJYMb682cJhiqhMwTz74-GbPWRBWF1vgxX2x4kC-rPmo8zvlrxHsGeeQR8BmxPKLmjtf0LoB6UNAXL4iPffGKUvlV28ty90dA4kPiBw5UrHYffwZXuf4-0H0s0TJLmv5UU3neZ05xgNhn-iJRkGalcoMVkrf6-iGBBv_EsA2zuAlGLBOWie2L_2TD39WoIFhZzniGl2enNRV1USEMXj62OXKiKZp3MxDuo3X8BFZgPKEI1dA2t26D2uhqZGoFEiQq8BWOQx8xMvAwU2c7mz2AqIl2kAHecU0nlysM_l21SbZkmIeBlmEG3o7wYMQ
+
+# Where this repository runs live, if anywhere — the footer shows it as a globe.
+# url: https://example.com
+
+# How to run this repository. Yours to edit — the governance lines above are
+# not. One terminal per entry, launched together by the ▶ button in VS Code
+# (the VSD8A extension) and by nothing else.
+run:
+  {
+    "// how to run it": "F5 in VS Code opens the Extension Development Host - that is the editor, not a terminal",
+    "smoke": { "cmd": "npm test" }
+  }
