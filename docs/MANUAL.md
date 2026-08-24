@@ -40,7 +40,7 @@ section below is one of those entries.*
 ## Traffic lights — one clickable entry per session
 
 Every LIVE Claude session whose working directory is inside the current workspace gets
-its OWN status bar entry: `🟢 web`, `🟠 fix`, … 🟢/🟠/🔴 (and ⚪ for live sessions with
+its OWN status bar entry: `🟢 web`, `🟠 fix`, … 🟢/🟠/🟡/🔴 (and ⚪ for live sessions with
 no tab in this window) show in the status bar — unknown-state sessions stay reachable
 through the *Chutdown: Sessions & Terminals* dropdown, and any session quiet longer than
 `staleMinutes` (default **30**) — unless a tab in this window is running it, which keeps
@@ -49,10 +49,18 @@ click it to list the idle sessions and jump to one, or click a name right in its
 open or resume that one directly. **Click a light and that session's terminal comes to
 the front in the main editor area** — and if it has no terminal tab
 in this window, a fresh terminal opens and resumes it (`claude --resume`) right away,
-no popup. Hover shows the state, the latest assistant output, and — in the footer, above
-the *Click to show…* line — **First** and **Latest**: the prompt the session was started
-on and the most recent one you sent it. Those collapse to a single unlabelled line while
-a session is still on its opening prompt.
+no popup — **in the folder the session was launched in** (the transcript's first record,
+which is also the project it is filed under), not wherever its own Bash tool last `cd`'d:
+resuming there put the folder's name on the end of the tab (VS Code's `${cwdFolder}`
+description, shown when a terminal's cwd is not the workspace root) and filed the session's
+work under the wrong project. Hover shows the state, a line of the latest assistant output
+(the first 200 characters — **Copy text** carries the whole 800-character tail), and — in
+the footer, above the *Click to show…* line — **First** and **Latest**: the prompt the
+session was started on and the most recent one you sent it. Those collapse to a single
+unlabelled line while a session is still on its opening prompt. The latest prompt is
+usually far behind the tail — one tool-heavy turn is bigger than the 256 KB the scan
+reads — so when the tail holds none the scan reads back a slab at a time until it meets
+one, once per window of growth, rather than leaving the line off.
 Closing a claude tab — or clicking **✕ Close** in a light's hover — retires its light
 and drops the session into the **idle** dropdown immediately, however young; the
 dismissal survives a reload, and new transcript activity (resuming it) promotes it
@@ -133,7 +141,23 @@ the relaunched shell writes its own title over the top, just the shell's name �
 Bash as the default profile, a whole window of restored tabs reads `bash`. So the bindings
 are also saved in tab order, with a slot for *every* tab, claude or not: at startup those
 slots are lined up with the restored tabs and the names go back on by position
-(`restoreTabNames`, on by default). A session that has aged out of
+(`restoreTabNames`, on by default). Three passes, strongest evidence first, each taking only
+what the one before left: a tab still *wearing* a saved title is that session's tab wherever
+it sits; then the slots — taken whole or not at all, because the saved order is creation
+order while a restart brings tabs back grouped by location (panel first, editor area after),
+so in a window that mixes `.terminals` batch tabs with claude tabs every claude slot can land
+on a batch tab (that once emptied a 12-tab window, silently); then whatever is still free
+pairs left to right with whatever still looks like a claude tab. If nothing matches at all
+the log says so (`revive: 4 saved session(s) but none of the 12 restored tab(s) matched …`)
+and the **saved list is kept, not overwritten** — until a tab opens or closes or a session
+binds, the 5-second save leaves it alone (`bindings: keeping the saved list - 4 session(s) in
+it never found their restored tab`), so one missed pairing cannot turn into a window that
+comes back empty on the next reload too. And because that pass runs once the tab set has
+merely gone *quiet* — on a slow cold boot the panel's tabs are back seconds before the editor
+area's — a session that found no tab **stays pending while the window has fewer tabs than
+were saved** (`revive: 4 session(s) still waiting for a tab - 4 of 14 tab(s) back so far`):
+every tab that arrives later re-runs the pairing, up to a minute from load, and a shell found
+in use is not offered again. A session that has aged out of
 `lookbackHours` gets the exact title it wore at quit time. Those tabs are empty shells — the
 pty host died with the app, and what VS Code relaunched is a fresh shell — so once the tabs
 have settled each session is **resumed automatically** (`autoResume`, on by default). Not
@@ -153,7 +177,7 @@ that cannot be read (no default set, a PowerShell or WSL source) the workbench's
 applies as for any terminal (`revive: reopening in C:\Program Files\Git\bin\bash.exe`). A
 panel tab is opened as a split
 of the dead one so it keeps its slot in the row; an editor-area tab goes to the active
-column. The log line reads `revive: re-bound 3 claude tab(s) by tab slot after a restart -
+column. The log line reads `revive: re-bound 3 claude tab(s) (3 by slot) after a restart -
 resumed 3 of them (3 in fresh terminals)`; a tab that could not be reopened is resumed in
 place the old way. A claude you opened and never spoke to has a session id but no transcript
 (Claude Code writes the file on the first message), and `claude --resume` on it only answers
@@ -220,6 +244,24 @@ gap. If a pass never reports in, a 90-second backstop takes the spinner down any
   slowest first response took 5 minutes, so the light waits that long before giving up.
   The sound and the armed shutdown wait twice as long again before they stop counting
   it as work — a wrong light costs nothing, a wrong shutdown does not undo
+- 🟡 **a background shell is still running** — the turn ended, but a command it started
+  did not: a Bash call made with `run_in_background`, or a foreground one moved to the
+  background when it outran its timeout. Claude Code is **re-invoked when that command
+  exits**, so the session has more work coming and this is not a 🔴 that wants a new
+  prompt. It is the one light that is **not** orange and not red on purpose: every 🟠
+  above means *you* are the thing being waited for, and this means the opposite — nothing
+  is wanted from you, and the session will start itself again. Nothing in the transcript
+  says so — the exit notification is the first record
+  about it — so it is read from the command's own output file under the temp dir, whose
+  last line is `[exited with code N]` once it is over (a clean exit, a failure and a kill
+  all leave one; a live command leaves none, and an empty file is one that has not
+  printed anything yet). It holds the sound, the popup and the armed shutdown as well as
+  the light, so a ten-minute build no longer chimes at minute one or powers the machine
+  off at minute three. Capped by `shellMinutes` (default 60) measured from when the turn
+  ended, because a dev server writes nothing and exits never — "it stopped printing" is
+  not "it stopped running", so the file's own mtime is no use as a clock. A session that
+  is **waiting on you** is never held by this: being asked something is exactly when you
+  want the chime. `shellMinutes: 0` turns the whole thing off
 - 🔴 **ready to reprompt** — the turn is done, nothing is being asked; send the next
   prompt whenever
 - ⚪ **running in another window** — no terminal tab here, but the transcript is still
@@ -348,7 +390,11 @@ Lights you are done with have a way out: hover one and click **✕ Close**, or
 something to leave sitting under the cursor when the dropdown opens). The same hover
 carries **$(go-to-file) Transcript**, which opens the raw `.jsonl` the light is read
 from; the light itself opens or resumes the session, which is what you want almost
-every time. Closing only retires the light — the
+every time. Next to it, on any light whose session has a tab in this window,
+**🗑 Close tab** closes that tab — the counterpart to the click that opens it, for when
+you are done with a session rather than done with its light. Nothing is lost: the tab's
+own close event retires the light into **idle**, the transcript stays on disk, and
+picking it in the idle list resumes it. Closing only retires the light — the
 session moves to the **idle** dropdown, nothing is deleted, and picking it there
 resumes it. A dismissal **survives a reload**, and it is not spent by Claude Code's
 own bookkeeping: the receipt is only cashed when a turn actually moves again, so the
@@ -381,22 +427,43 @@ Open Claude **through the extension** and its tab is ours to manage:
 
 - a **lettered status bar launch button** — one per `claudeButtons` entry, by
   default `opus`, `fable`, `sonnet` and `haiku` (Opus 5, Fable 5, Sonnet 5 and
-  Haiku 4.5). Each wears its model's own mark — the same **O / F / S / H** the editor
+  Haiku 4.5). Each wears its model's own mark — the same letters the editor
   title bar and the terminal tabs draw, shipped a second time as an icon font
   (`media/chutdown.ttf`, built by `media/make-font.js`) because a status bar item takes
   icon *ids*, not SVG files. A hand-typed model outside the catalog has no letter and
-  keeps a `$(sparkle)`. Each entry is `label = model`, with the model passed to
-  `claude --model`. **The hover says what that model is best used for** — four
-  buttons side by side is guesswork otherwise, and the status bar has room for a
-  label and nothing else (and on a crowded bar not even that: the labels are the
-  first thing to go, leaving the letters — see *When the bar is full* above):
+  keeps a `$(sparkle)`. Each entry is `label = model`. **The hover says what that model
+  is best used for** — eight buttons side by side is guesswork otherwise, and the status
+  bar has room for a label and nothing else (and on a crowded bar not even that: the
+  labels are the first thing to go, leaving the letters — see *When the bar is full*
+  above). **The letters carry a colour**: orange for the Claude models, blue for the
+  OpenAI ones — Sonnet and Sol are both an **S**, and when the bar is down to letters
+  the colour is the only thing that tells them apart (a status bar item has one colour
+  for all its text, so the whole button takes it; the editor-title icons and the tab
+  marks are coloured SVGs). The catalog:
 
-  | button | model | best used for |
-  | --- | --- | --- |
-  | **O** opus | `claude-opus-5` | the everyday workhorse — complex agentic coding, multi-file features, larger refactors, long autonomous runs |
-  | **F** fable | `claude-fable-5` | the most capable model, and the most expensive — the hardest reasoning and longest-horizon work, the tasks Opus does not finish |
-  | **S** sonnet | `claude-sonnet-5` | near-Opus quality on coding and agentic work at a fraction of the cost |
-  | **H** haiku | `claude-haiku-4-5` | fastest and cheapest — quick edits, renames, lookups, summaries, boilerplate |
+  | button | model | opens | best used for |
+  | --- | --- | --- | --- |
+  | 🟠 **O** opus | `claude-opus-5` | `claude --model` | the everyday workhorse — complex agentic coding, multi-file features, larger refactors, long autonomous runs |
+  | 🟠 **F** fable | `claude-fable-5` | `claude --model` | the most capable model, and the most expensive — the hardest reasoning and longest-horizon work, the tasks Opus does not finish |
+  | 🟠 **S** sonnet | `claude-sonnet-5` | `claude --model` | near-Opus quality on coding and agentic work at a fraction of the cost |
+  | 🟠 **H** haiku | `claude-haiku-4-5` | `claude --model` | fastest and cheapest — quick edits, renames, lookups, summaries, boilerplate |
+  | 🔵 **S** sol | `gpt-5.6-sol` | `codex -m` | OpenAI's frontier model and Codex's default — complex coding, research, long real-world tasks |
+  | 🔵 **T** terra | `gpt-5.6-terra` | `codex -m` | balanced quality, latency and cost — everyday agentic coding when Sol is more than the job needs |
+  | 🔵 **L** luna | `gpt-5.6-luna` | `codex -m` | fast and affordable agentic coding — high-throughput, lower-latency work |
+  | 🔵 **M** mini | `gpt-5.4-mini` | `codex -m` | small, fast and cost-efficient — simple, well-scoped coding tasks |
+
+  The blue four are the models Codex's own `/model` picker leads with (Codex 0.149). A
+  button on one of them opens a terminal named `codex` running **`codex -m <model>`**,
+  wearing its blue letter — and that tab is **not tracked**: no traffic light, no
+  auto-rename, no place in the bindings or the armed shutdown, because every one of
+  those reads Claude Code's own session files (transcripts, pid files, the status file)
+  and a codex tab writes none of them. It is a plain terminal that happens to wear a
+  letter. A hand-typed entry is routed by the shape of its id — `gpt-*`, `o3`/`o4`,
+  `codex*` go to codex, anything else to claude — so `mini = gpt-5-mini` (an Azure OpenAI
+  deployment name, which is what `codex -m` takes when Codex is pointed at Azure) opens
+  through codex and wears the **M** by family match, the same way a pinned
+  `claude-haiku-4-5-20251001` finds the **H**. The packaged default list is still the
+  four Claude buttons; tick the blue ones in the picker.
 
   <img src="../media/screenshots/hover-model.png" width="830" alt="The fable launch button's hover: Claude Fable 5, what it is best used for, and a Choose models link">
 
@@ -426,21 +493,32 @@ Open Claude **through the extension** and its tab is ours to manage:
   tickable.
 
   To change which models are here, run **"Chutdown: Choose Models"** (or click
-  *Choose models* in any button's hover) and tick them: the picker writes
-  `claudeButtons` for you, in the fixed catalog order, into whichever settings scope
-  already holds the value. Hand-typed entries outside the catalog stay listed and
-  stay ticked, so a custom model id is never silently dropped. Editing the setting
-  by hand still works exactly as before (an empty list falls back to one plain
-  `claude` button with no model pin). The same buttons also sit **top-right in the
-  editor title bar**, leftmost in that row (a negative `navigation` order puts them
-  ahead of Claude Code's own "open in terminal" icon): the catalog models get the
-  letter buttons **O** / **F** / **S** / **H** (`media/letter-*.svg`, one pair per
-  letter for the light and dark themes). Menu contributions are static in VS Code, so
-  each letter is welded to its model rather than to a position: a slot shows only while
-  its own model is one of your buttons (`chutdown.slot1`…`slot4`), so dropping Fable
-  leaves a gap where the **F** was instead of sliding Sonnet under it. A hand-typed
-  custom model gets a status bar button but no letter icon — there is no letter for it.
-  Turn the row off with `editorTitleButtons`.
+  *Choose models* in any button's hover) and tick them: the picker lists the Claude
+  models and the OpenAI models under their own headings (each says which CLI it
+  launches), every row led by its letter glyph, and writes `claudeButtons` for you, in
+  the fixed catalog order, into whichever settings scope already holds the value.
+  Hand-typed entries outside the catalog stay listed and stay ticked, so a custom model
+  id is never silently dropped. Editing the setting by hand still works exactly as
+  before (an empty list falls back to one plain `claude` button with no model pin). The
+  same buttons also sit **top-right in the editor title bar**, leftmost in that row (a
+  negative `navigation` order puts them ahead of Claude Code's own "open in terminal"
+  icon): the catalog models get the letter buttons **O** / **F** / **S** / **H** in
+  orange and **S** / **T** / **L** / **M** in blue (`media/letter-*.svg` and
+  `media/letter-*-openai-*.svg`, one pair per letter for the light and dark themes). Menu
+  contributions are static in VS Code, so each letter is welded to its model rather than
+  to a position: a slot shows only while its own model is one of your buttons
+  (`chutdown.slot1`…`slot8`), so dropping Fable leaves a gap where the **F** was instead
+  of sliding Sonnet under it — and the blue **S** is its own slot, never Sonnet's. A
+  hand-typed custom model gets a status bar button but no letter icon — there is no
+  letter for it. Turn the row off with `editorTitleButtons`.
+
+  **VS Code fits at most seven extension icons in that row.** The editor-title toolbar
+  caps its primary actions at nine, counts its own split-editor button among them and
+  hides from the ninth on, so with all eight catalog models ticked the eighth in catalog
+  order — the blue **M** — is not drawn in the row but filed under its **⋯** menu, where
+  it is still one click away (as are the status bar buttons, which have no such cap).
+  Untick any one model and the M comes back up. That is the toolbar's rule, not ours,
+  and it is why the row stops at seven even on a wide screen.
 
   <img src="../media/screenshots/editor-buttons.png" width="790" alt="The O / F / S / H buttons top right in the editor title bar, with the F button's hover: Fable - the most capable model, and the priciest">
 
@@ -453,18 +531,60 @@ Open Claude **through the extension** and its tab is ours to manage:
 - a `claude` entry in `.terminals`.
 
 The new terminal runs `claude` in the workspace root (the tab carries the launched
-model's own letter — the same **O** / **F** / **S** / **H** marks the editor title
-buttons wear, `media/letter-{o,f,s,h}-{light,dark}.svg`, so the tab says which model
-is running in it. A **resumed** session gets its letter too, read out of the transcript:
+model's own letter — the same **O** / **F** / **S** / **H** marks the editor title buttons
+wear, so the tab says which model is running in it; a codex tab wears the **S** / **T** /
+**L** / **M** in blue, or a plain sparkle for an OpenAI model with no letter — never the
+"C", which says "a claude tab we manage". On the tab the mark is a **glyph from Chutdown's
+own icon font** (`media/chutdown.ttf`, the same glyphs the status bar buttons use) rather
+than the SVG the editor title bar draws, because a file-based icon does not survive a
+window reload — the reconnected tab came back wearing the workbench's default terminal mark
+(≡) — while a font glyph is kept by id and comes back as it was. A terminal tab icon takes
+only the standard `terminal.ansi*` theme colours, so the tab letter wears your theme's
+**ansiYellow** for Claude and **ansiBlue** for OpenAI rather than the exact orange and blue
+of the buttons. A **resumed** session gets its letter too, read out of the transcript:
 every assistant record names the model that wrote it, so the mark follows what the
 session has actually been running — a mid-session `/model` switch included — rather than
 what it was first launched with. A tab whose model Chutdown cannot know — the + dropdown
 profile, a hand-typed custom model, a session nothing has answered in yet — carries the
-Chutdown "C" instead, `media/tab-claude-{light,dark}.svg`. The mark is fixed when the
-terminal is created and VS Code offers no way to change it afterwards, so it reports what
-was *launched*; it survives a window reload and a full restart, because VS Code persists
-the icon alongside the tab's title, but a tab **revived** from a quit and resumed back
-into its own empty shell keeps whatever mark it came back with)
+Chutdown "C" instead (its own glyph, `chutdown-c`). The mark is fixed when the terminal is
+created and VS Code offers no way to change it afterwards, so on its own it reports what
+was *launched* — a "C" tab stayed a "C" however long the transcript had been naming the
+model answering in it. So on the two occasions the tabs are brought up to date — **the
+window loading** (the pass runs when the restored tabs have settled and again from the poll
+for the first minute, so a tab whose binding or scan entry arrives a moment late, or that
+was mid-turn at load, is still caught), and the **"Chutdown: Refresh tab names"** command —
+a bound tab whose mark is **wrong** for what its session is running is **reopened wearing
+the right letter**: the same reopen a quit gets (a fresh terminal of Chutdown's own in its
+place, born wearing the title and the letter, in your default shell, `claude --resume <id>`
+typed into it). A reload on its own no longer reopens anything — the glyph marks survive
+it — so this is only the "C" whose model is now known, a `/model` switch, and, once, the
+tabs made before the glyphs (their SVG mark is gone after the next reload and the binding
+says so). It kills the claude in the old tab and resumes the session into the new one — and
+with it the Tab-to-accept suggestion sitting in that prompt, which lives only in claude's
+memory and cannot be read or saved from outside — so it is only done where that costs
+nothing else you can see: the session must be **idle at its prompt** (🔴 — not mid-turn,
+not waiting on a permission or a question, not working in the background), its own status
+file — when it has a fresh one — must say idle too, and its transcript must have been
+**quiet for 20 seconds** (between two records of one turn the tail can read as a finished
+turn; twenty seconds tells them apart, and a finished turn writes once more and then falls
+silent). Reopens are **paced, two per pass** five seconds apart: each holds two consoles
+for a moment (the new tab opens before the old one is torn down), and Git Bash allows 32 in
+all — eleven at once, on top of the `.terminals` servers, killed a new tab's shell with
+*"console device allocation failure - too many consoles in use"*. A tab left wearing the
+wrong letter says why in the log (`marks: window loaded - left 1 tab(s) wearing the wrong
+letter: api (? -> F) - processing`, `… - wrote 6s ago, waiting for it to settle`, `… 3 more
+next pass`). What the
+prompt box is showing cannot be read from outside: a history suggestion sitting there
+(ghost text, Tab to take it) is safe — it comes back with the resume — but a draft you had
+typed and not sent is resumed fresh, so if you reload with one in an idle tab, keep that in
+mind. (The workbench's "typed here" flag, which spares a restored tab you got to first
+after a quit, is deliberately *not* consulted here: claude turns terminal focus reporting
+on, so the tab the window comes back looking at reports its focus-in and counts as
+"typed into" before you have touched a key — it would leave the very tab you are looking
+at wearing the wrong letter, every time.) Within a window the letter each tab was made with
+is remembered, so the command reopens only tabs whose mark is actually wrong; a tab
+**revived** from a quit and resumed back into its own empty shell keeps whatever mark it
+came back with until the next pass)
 **as a tab in the main editor area**, not the bottom panel (`openInEditorArea`, default on —
 panel-born terminals are moved over the first time you click their light). Once you
 send your first prompt, the tab renames itself to `🟢 <a distinctive word from your
@@ -709,6 +829,70 @@ Knowing a question is up at all takes the CLI's own status file — see **🟠 w
 you** under Traffic lights. A session with no such file falls back to what the transcript
 can infer, exactly as before.
 
+**A command still running is not "finished" either — for `shellMinutes`.** A Bash call
+Claude left running when the turn ended — `run_in_background`, or a foreground one moved
+to the background when it outran its timeout — brings Claude *back* when it exits, so the
+session has more work coming and none of the three gears should fire over it. The
+transcript is silent about that until the exit notification lands, which is how the chime
+went off one minute into a ten-minute build and how the armed gear powered the machine off
+in the middle of one; the honest signal is the command's own output file under the temp
+dir (see **🟠 a background shell is still running** under Traffic lights). Held for
+**`shellMinutes` (default 60)** from the end of the turn, because a dev server exits never
+and must not keep the machine awake all night; `0` turns it off entirely. Unlike a
+question, this holds the **sound** and **notify** gears too — nothing wants you back at
+the keyboard yet — and for the same reason it stands down the moment the session is
+waiting on you.
+
+### Answering a prompt for you
+
+A session blocked on a prompt stops dead until a human presses a key. That is right while
+you are sitting there and useless when you are not — the armed gear's whole premise is
+that you walked away, and a run that stopped on question two at 11pm has wasted the night.
+
+So each gear can be told to answer. After **`autoAnswerMinutes` (default 5)** with nobody
+touching it, Chutdown types **one Enter** into that session's tab, taking whichever option
+the dialog has highlighted — the first one, and by convention the recommended one. Nothing
+else is ever typed: no arrow keys, no text, no second press. Only the window whose tab it
+is can do it (a session running in another window is that window's to answer, and a shell
+VS Code revived empty after a quit has nothing listening in it). Each answer is a line in
+**View → Output → Chutdown**.
+
+**One setting per gear**, because the four are four different situations:
+
+| setting | default | |
+| --- | --- | --- |
+| `autoAnswerShutdown` | **on** | armed — nobody is at the keyboard by definition |
+| `autoAnswerNotify` | off | the gear that fetches you, rather than the one that carries on without you |
+| `autoAnswerSound` | off | a chime is for someone within earshot, and they can answer for themselves |
+| `autoAnswerOff` | off | for a run you leave going overnight wanting none of the other three |
+
+**`autoAnswerScope` decides what may be answered, and this is the part to read.** It
+defaults to **`all`** — anything a session is blocked on, **permission prompts and plan
+approvals included** — and what a permission prompt has highlighted is *yes*. With the
+armed gear on and the scope left alone, Claude can be granted a tool you were not there to
+approve. That is the point of it for an overnight run, and `autoAnswerScope: "questions"`
+is the setting that keeps a human in front of every grant: a multiple-choice question's
+highlighted option is a *recommendation*, while a permission prompt's is a *decision*.
+
+Which kind of prompt is up is not guessed. Claude Code writes **`waitingFor`** beside its
+`waiting` status in `~/.claude/sessions/<pid>.json` — `"input needed"` for a question with
+options, `"permission prompt"` for a tool permission or a plan approval, plus `"sandbox
+request"`, `"worker request"`, `"goal proposal"` and `"dialog open"`. A value this file has
+never heard of is *not* treated as a question, on the same rule the rest of the status file
+gets: what we do not recognise, we do not reinterpret.
+
+**Both hovers say where you stand.** A waiting session's light counts down — *"Chutdown
+answers this in 4 min — the highlighted option"* — or says why nothing is coming (*"the
+sound gear does not answer prompts"*, *"autoAnswerScope is questions only, and this is a
+permission prompt"*), and for ten minutes afterwards it says that a key was pressed and
+which one. The gear toggle's hover states the policy for the gear you are in, whichever
+that is.
+
+The answer is latched against the moment the CLI said it started waiting, so a dialog that
+ignores Enter — an `"input needed"` that wants typed text — is answered **once** rather
+than hammered every five seconds, while the *next* prompt is a new question and gets its
+own answer.
+
 **The gear travels between windows.** It is one decision about one machine, so setting it
 in whichever window you happen to be in shows the same gear in all of them, and turning it
 off anywhere turns it off everywhere — a toggle reading "off" while the machine really is
@@ -750,6 +934,26 @@ waits for those too"*, and a window with somebody at a prompt spells that out as
 *"card (1 running, 1 waiting on you)"* — and
 so does the notification if a turn starts elsewhere mid-countdown. The **sound** and
 **notify** gears stay per-workspace: those are about *this* project finishing.
+
+**A window inside another window owns its own sessions.** A window's scan takes every
+session launched under its workspace roots — right for the lights: a window on `detf`
+should see the claude running in `detf\tools\Chutdown`. But open a *second* window on that
+very folder and the same sessions are watched by both, and both windows' sound and notify
+gears used to fire the moment the inner ones finished — two popups at once, and the outer
+one's *"All 8 sessions finished"* was six of its own plus two next door. So a session
+belongs to the **live window with the most specific root it was launched under**, and the
+gears of every window above leave it alone: the Chutdown window chimes for Chutdown, the
+detf window for the rest of detf, each once. Ownership goes by the folder the session was
+*launched* in (its transcript's own filing folder, `s.home`), not wherever its Bash tool
+last `cd`'d — a detf session that wandered into `tools/Chutdown` is still detf's. It is
+decided from the same heartbeat every window already writes (which carries the full
+workspace roots for the purpose), so when the inner window closes its sessions fall back
+to the outer one within a few polls, and nothing is ever unwatched. The lights, the hover
+and the idle list still show everything under the workspace — this is only about who gets
+told. The gear's hover names what was handed over (*"2 sessions under Chutdown are that
+window's to announce, not this one's"*) and the log says it once, when it changes
+(`gears: 2 sessions under Chutdown belong to the window open on that folder - it chimes for
+those, not this one`).
 
 **The countdown comes up as a window you can actually see.** As well as the VS Code
 notification, the armed countdown puts a **desktop window** on screen — always on top,

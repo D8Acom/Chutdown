@@ -30,6 +30,7 @@ const scan = require('./scan');
 const claude = require('./claude');
 const lights = require('./lights');
 const batch = require('./batch');
+const answer = require('./answer');
 const usage = require('./usage');
 
 const MODES = ['off', 'sound', 'notify', 'armed'];
@@ -346,7 +347,9 @@ function notifyDone() {
 // The answer comes from the transcripts, not from a stopwatch: a session is finished
 // when its newest main-thread record says the TURN ENDED (scan.parseTail reads the
 // API's own stop_reason) and nothing has been written for it since - including by
-// background agents, whose sidecar writes push lastWriteMs forward (scan.js).
+// background agents, whose sidecar writes push lastWriteMs forward (scan.js) - and
+// nothing it STARTED is still running: a background shell outlives its turn and brings
+// Claude back when it exits, so a session with one under it is finished with neither.
 // `settleSeconds` is only an anti-flicker margin for the case where a finished turn
 // is immediately continued by a queued message or a hook; it is not a guess about
 // whether Claude is done, which is why it is seconds and not minutes.
@@ -375,6 +378,14 @@ function isFinished(s, settle) {
     // as the main thread - never from sidecar mtimes, which go quiet for a minute at
     // a time mid-tool-call and once let the chime fire under six mid-turn agents.
     if (s.background) return false;
+    // A background SHELL still running is the same answer for a different reason: a
+    // command started with `run_in_background` (or moved there when it outran its
+    // timeout) outlives the turn that started it and RE-INVOKES Claude when it exits, so
+    // a session sitting on one has more work coming - chiming, popping up or powering off
+    // now all land in the middle of a build. Read from the command's own output file
+    // (scan.js), capped by shellMinutes, and stood down for a session that is waiting on
+    // YOU: being asked something is exactly when the chime should fire.
+    if (scan.shellBusy(s)) return false;
     if (s.state === 'awaiting') return finishedMs(s) >= settle;
     // We could not read far enough back to tell (scan.js: a single record bigger than
     // the retry window - a pasted image, a screenshot-returning tool). NOT finished:
@@ -413,7 +424,8 @@ function isFinished(s, settle) {
 /// the toggle beside a fresh empty tab started the countdown immediately - on evidence
 /// that no work had ever happened, not that it had ended.
 function status() {
-    const watched = [...shared.sessions.values()].filter((s) => !s.closedTab && s.state !== 'unknown');
+    const watched = [...shared.sessions.values()]
+        .filter((s) => !s.closedTab && s.state !== 'unknown' && !ownedElsewhere(s));
     const settle = settleMs();
     return {
         watched,
@@ -475,6 +487,80 @@ function peerFile() {
     return path.join(PEERS, PEER_ID + '.json');
 }
 
+// ------------------------------------------------- whose session is it, then?
+//
+// A window's scan takes every session launched under its workspace roots (scan.js), and
+// that is right for the lights: a window open on `detf` should see the claude running in
+// `detf\tools\Chutdown`. But when a SECOND window is open on that very folder, the same
+// session is watched by both, and the two windows' sound and notify gears fire together
+// the moment it finishes - two popups at once, one of them from a window whose own work
+// it never was. The outer window used to say "All 8 sessions finished" and mean six of
+// its own plus the two next door.
+//
+// So a session is OWNED by the live window with the most specific root it sits under,
+// and the gears of every window above that one leave it alone: the Chutdown window
+// chimes for Chutdown, the detf window chimes for the rest of detf, and each says so
+// once. "Live" is the same heartbeat freshness as everything else here - the nested
+// window closes, and its sessions fall back to the outer one within a few polls, so
+// nothing is ever unwatched. The folder is the one the session was LAUNCHED in
+// (s.home, the transcript's own filing folder), not wherever its Bash tool last cd'd:
+// a detf session that wandered into tools/Chutdown is still detf's.
+//
+// Only the GEARS use this. The lights, the hover and the idle list keep showing every
+// session under the workspace, exactly as before - this is about who gets told.
+function normPath(p) { return String(p || '').replace(/[\\/]+$/, '').toLowerCase(); }
+function isUnder(p, root) {
+    return !!root && (p === root || p.startsWith(root + '\\') || p.startsWith(root + '/'));
+}
+
+/// Peer roots strictly INSIDE one of ours, read once a poll rather than once per status()
+/// call - status() runs several times a tick, and on every fs.watch wake.
+let nestedAt = 0;
+let nestedRoots = [];
+let nestedSaid = '';
+function nestedPeerRoots(force) {
+    const now = Date.now();
+    if (!force && now - nestedAt < 2000) return nestedRoots;
+    nestedAt = now;
+    const ours = scan.workspaceRoots();
+    const found = [];
+    for (const p of readPeers()) {
+        for (const raw of (Array.isArray(p.paths) ? p.paths : [])) {
+            const r = normPath(raw);
+            if (ours.some((o) => r !== o && isUnder(r, o)) && !found.includes(r)) found.push(r);
+        }
+    }
+    nestedRoots = found;
+    return nestedRoots;
+}
+
+function sessionHome(s) { return normPath(s.home || s.cwd); }
+
+function ownedElsewhere(s) {
+    const roots = nestedPeerRoots();
+    if (!roots.length) return false;
+    const home = sessionHome(s);
+    return roots.some((r) => isUnder(home, r));
+}
+
+/// "2 session(s) under Chutdown" - the ones another window is watching for us, for the
+/// hover and the log. Logged once per change, not once per poll.
+function ownedElsewhereNote() {
+    const roots = nestedPeerRoots();
+    if (!roots.length) { nestedSaid = ''; return ''; }
+    const taken = [...shared.sessions.values()].filter((s) => !s.closedTab && s.state !== 'unknown' && ownedElsewhere(s));
+    if (!taken.length) { nestedSaid = ''; return ''; }
+    const names = [...new Set(taken.map((s) => path.basename(roots.find((r) => isUnder(sessionHome(s), r)) || '')))]
+        .filter(Boolean).join(', ');
+    const note = taken.length + ' session' + (taken.length === 1 ? '' : 's') + ' under ' + names;
+    const key = taken.map((s) => s.id).sort().join(',') + '|' + names;
+    if (key !== nestedSaid) {
+        nestedSaid = key;
+        shared.nlog('gears: ' + note + ' belong to the window open on that folder - it chimes for those, not this one');
+    }
+    return note;
+}
+
 /// This window's line in the shared ledger, written every poll.
 function writePeer() {
     const { watched, busy } = status();
@@ -500,6 +586,10 @@ function writePeer() {
         fs.writeFileSync(tmp, JSON.stringify({
             at: Date.now(),
             root: path.basename(shared.firstRoot() || '') || 'workspace',
+            // The full roots, so a window open on a folder INSIDE this one can be told
+            // apart from one open on a sibling: the sessions under it are that window's
+            // to chime for (ownedElsewhere). `root` stays the short name for the hover.
+            paths: scan.workspaceRoots(),
             // The gear, and WHEN it was last decided: this is how the toggle travels
             // between windows (see below). The GEAR, not the live toggle - they part
             // company when this window is in a gear that does not travel, and a record
@@ -594,6 +684,8 @@ function everyoneFinishedCheap() {
 /// finished until its completion notification lands. Cheap to be wrong about that
 /// anywhere else; here it powers the machine off mid-agent. So the trigger re-walks
 /// for real before it agrees, which costs one walk at the one moment it matters.
+/// The same walk re-reads the background SHELLS - the other thing that outlives a turn
+/// and would be powered off in the middle of itself.
 function backgroundResumed() {
     try { return scan.recheckBackground(status().watched); } catch { return false; }
 }
@@ -733,6 +825,10 @@ function toggleHover(what, click) {
         'read from each transcript\'s own stop reason, never guessed from silence. A session waiting on ' +
         'a question counts as finished; one mid-tool-call does not' + settleNote() + '.  \n\n');
     md.appendMarkdown(watchLine() + '  \n\n');
+    // What this gear does about a session that stops to ask something - stated in every
+    // gear, including the ones that answer nothing, because "it will answer for me" and
+    // "it will sit there until I come back" are equally worth knowing before you walk off.
+    md.appendMarkdown(answer.gearLine(mode) + '  \n\n');
     md.appendMarkdown('_Click for ' + click + '._  \n');
     md.appendMarkdown('\n[$(play) Test sound](command:chutdown.testSound)' +
         ' · [$(bell-dot) Test popup](command:chutdown.testNotify)' +
@@ -755,6 +851,11 @@ function watchLine() {
     if (armed && waiting.length)
         extra = '  \n$(question) **Waiting on your answer:** ' + busyNames(waiting) +
             ' - the shutdown will not run over a question.' + extra;
+    // Sessions a window open on a folder INSIDE this workspace is watching: that window
+    // chimes for them, so they are not in the counts above - and the hover says so,
+    // or "All 6 sessions finished" beside eight lights reads as a miscount.
+    const theirs = ownedElsewhereNote();
+    if (theirs) extra += '  \n$(window) **' + shared.mdText(theirs) + '** are that window\'s to announce, not this one\'s.';
     if (!watched.length)
         return '$(circle-slash) **Nothing to watch yet** - no session in this workspace has taken a turn.' + extra;
     if (busy.length) return '$(sync~spin) **Still working:** ' + busyNames(busy) + '.' + extra;
@@ -809,7 +910,8 @@ function updateToggle() {
             'When the trigger below is met' + quietSuffix() + ', a **' + secs + 's countdown** appears with ' +
             'a Cancel button. It is not a commitment: the trigger is re-read every second, and once more ' +
             'immediately before anything irreversible - so a session that starts working again (a hook, a ' +
-            'queued message, a background agent, another window) calls the whole thing off and leaves the ' +
+            'queued message, a background agent, a background shell still running, another window) calls ' +
+            'the whole thing off and leaves the ' +
             'gear armed for next time. Clicking this toggle mid-countdown stops it too.  \n' +
             'Then the `.terminals` batch gets Ctrl+C - so dev servers exit rather than being killed ' +
             'mid-write - and ' + (action === 'test'
@@ -1046,6 +1148,10 @@ function watchTranscripts() {
 let seeded = false;
 
 async function tick() {
+    // The gear, where anything that is not shutdown.js can read it: the hovers and the
+    // auto-answer policy both turn on which gear this window is in, and a lights.js that
+    // had to require this module back would close a circle for one string (answer.js).
+    shared.state.gear = mode;
     scan.scanSessions();
     // First scan of the window: everything that had no tab when we last saved starts
     // idle rather than as a light. Uses the PERSISTED binding record, so it does not
@@ -1063,6 +1169,10 @@ async function tick() {
     draw('lights', () => lights.renderSessions());
     shared.clearGate('scan');   // the lights are on screen: half the startup spinner
     draw('rename', () => claude.renameActiveClaude());
+    // The window-loaded marks pass again, for the first minute after load: a tab whose
+    // binding or session arrived after the settle pass, or that was mid-turn then and
+    // is idle now, is reopened wearing its letter (claude.refreshTabMarks).
+    draw('marks', () => claude.pollTabMarks());
     draw('stop button', () => batch.updateStopItem());
     draw('usage', () => usage.usageTick());
     draw('port probe', () => {
@@ -1070,10 +1180,18 @@ async function tick() {
             if (rec.port !== undefined && !rec.exited) batch.probePort(rec);
     });
 
+    // A session sitting on a question, with the gear set to answer it: typed BEFORE the
+    // `mode === 'off'` return below, because `off` is one of the four gears this can be
+    // switched on for - a gear that powers nothing off can still be the one you leave
+    // running overnight. Draw-wrapped like the rest: a throw in here must not take the
+    // trigger with it.
+    draw('auto-answer', () => answer.pass(status().watched));
+
     // The heartbeat is written whatever gear this window is in, including OFF: it is how
     // an armed window somewhere else knows this one is still working. And the gear itself
     // is read back, so arming in one window shows up here within a poll.
     draw('peers', writePeer);
+    draw('nested windows', ownedElsewhereNote);   // logs once when a nested window takes sessions over
     draw('gear sync', syncGear);
 
     if (firing || mode === 'off') return;
@@ -1121,7 +1239,8 @@ async function tick() {
     // one costs two directory trees per watched session, so it runs only once everything
     // else has already said fire.
     if (backgroundResumed()) {
-        shared.nlog('armed: a background agent is writing again - not finished');
+        shared.nlog('armed: a background agent is writing again, or a background shell is ' +
+            'still running - not finished');
         return;
     }
     fire(watched.length);
@@ -1503,5 +1622,6 @@ Object.assign(module.exports,
     { updateToggle, cycleMode, playSound, soundChoices, pickSound, notifyNow,
       watchTranscripts, tick,
       writePeer, dropPeer, readPeers, peersBusy, peerBusyList,
+      status, ownedElsewhere, nestedPeerRoots,
       everyoneFinished, powerAvailable,
       writeGear, syncGear });

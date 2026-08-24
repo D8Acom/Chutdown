@@ -2,7 +2,7 @@
   "name": "chutdown",
   "displayName": "Chutdown",
   "description": "Claude session traffic lights in the status bar, batch terminal launching from a .terminals file, and an armable auto-shutdown when every session finishes.",
-  "version": "0.1.5",
+  "version": "0.1.8",
   "license": "MIT",
   "publisher": "d8a",
   "repository": { "type": "git", "url": "https://github.com/D8Acom/Chutdown.git" },
@@ -20,7 +20,11 @@
       "chutdown-letter-o": { "description": "Opus - the O launch mark", "default": { "fontPath": "./media/chutdown.ttf", "fontCharacter": "\\E001" } },
       "chutdown-letter-f": { "description": "Fable - the F launch mark", "default": { "fontPath": "./media/chutdown.ttf", "fontCharacter": "\\E002" } },
       "chutdown-letter-s": { "description": "Sonnet - the S launch mark", "default": { "fontPath": "./media/chutdown.ttf", "fontCharacter": "\\E003" } },
-      "chutdown-letter-h": { "description": "Haiku - the H launch mark", "default": { "fontPath": "./media/chutdown.ttf", "fontCharacter": "\\E004" } }
+      "chutdown-letter-h": { "description": "Haiku - the H launch mark", "default": { "fontPath": "./media/chutdown.ttf", "fontCharacter": "\\E004" } },
+      "chutdown-letter-t": { "description": "Terra - the T launch mark", "default": { "fontPath": "./media/chutdown.ttf", "fontCharacter": "\\E005" } },
+      "chutdown-letter-l": { "description": "Luna - the L launch mark", "default": { "fontPath": "./media/chutdown.ttf", "fontCharacter": "\\E006" } },
+      "chutdown-letter-m": { "description": "mini - the M launch mark", "default": { "fontPath": "./media/chutdown.ttf", "fontCharacter": "\\E007" } },
+      "chutdown-c": { "description": "The Chutdown C - a claude tab whose model is not known", "default": { "fontPath": "./media/chutdown.ttf", "fontCharacter": "\\E008" } }
     },
     "commands": [
       { "command": "chutdown.toggle", "title": "Chutdown: Next Gear (off / sound / notify / shutdown)" },
@@ -36,6 +40,7 @@
       { "command": "chutdown.focusTerminal", "title": "Chutdown: Show / Stop / Restart Batch Terminal" },
       { "command": "chutdown.openTranscript", "title": "Chutdown: Open Session Transcript" },
       { "command": "chutdown.showSession", "title": "Chutdown: Show Session" },
+      { "command": "chutdown.closeTab", "title": "Chutdown: Close Session Tab" },
       { "command": "chutdown.showStale", "title": "Chutdown: Idle Sessions" },
       { "command": "chutdown.showHistory", "title": "Chutdown: Session History" },
       { "command": "chutdown.setIdleMinutes", "title": "Chutdown: Fold Sessions Into Idle After..." },
@@ -51,7 +56,11 @@
       { "command": "chutdown.newClaudeSlot1", "title": "Opus - the everyday workhorse: complex agentic coding, multi-file features, larger refactors, long autonomous runs. Start here. (Editor title icon - shown while Opus is one of your launch buttons; change them with 'Chutdown: Choose Models')", "icon": { "light": "media/letter-o-light.svg", "dark": "media/letter-o-dark.svg" } },
       { "command": "chutdown.newClaudeSlot2", "title": "Fable - the most capable model, and the priciest: the hardest reasoning and longest-horizon work, the tasks Opus does not finish. (Editor title icon - shown while Fable is one of your launch buttons; change them with 'Chutdown: Choose Models')", "icon": { "light": "media/letter-f-light.svg", "dark": "media/letter-f-dark.svg" } },
       { "command": "chutdown.newClaudeSlot3", "title": "Sonnet - near-Opus quality on coding and agentic work at a fraction of the cost: the cost-conscious pick for ordinary tasks. (Editor title icon - shown while Sonnet is one of your launch buttons; change them with 'Chutdown: Choose Models')", "icon": { "light": "media/letter-s-light.svg", "dark": "media/letter-s-dark.svg" } },
-      { "command": "chutdown.newClaudeSlot4", "title": "Haiku - fastest and cheapest: easy, well-scoped jobs like quick edits, renames, lookups, summaries, boilerplate. (Editor title icon - shown while Haiku is one of your launch buttons; change them with 'Chutdown: Choose Models')", "icon": { "light": "media/letter-h-light.svg", "dark": "media/letter-h-dark.svg" } }
+      { "command": "chutdown.newClaudeSlot4", "title": "Haiku - fastest and cheapest: easy, well-scoped jobs like quick edits, renames, lookups, summaries, boilerplate. (Editor title icon - shown while Haiku is one of your launch buttons; change them with 'Chutdown: Choose Models')", "icon": { "light": "media/letter-h-light.svg", "dark": "media/letter-h-dark.svg" } },
+      { "command": "chutdown.newClaudeSlot5", "title": "Sol (Codex) - OpenAI's frontier model: complex coding, research and long real-world tasks. Opens a codex terminal. (Editor title icon - shown while Sol is one of your launch buttons; change them with 'Chutdown: Choose Models')", "icon": { "light": "media/letter-s-openai-light.svg", "dark": "media/letter-s-openai-dark.svg" } },
+      { "command": "chutdown.newClaudeSlot6", "title": "Terra (Codex) - balanced quality, latency and cost: the everyday agentic coding pick. Opens a codex terminal. (Editor title icon - shown while Terra is one of your launch buttons; change them with 'Chutdown: Choose Models')", "icon": { "light": "media/letter-t-openai-light.svg", "dark": "media/letter-t-openai-dark.svg" } },
+      { "command": "chutdown.newClaudeSlot7", "title": "Luna (Codex) - fast and affordable agentic coding: high-throughput, lower-latency work. Opens a codex terminal. (Editor title icon - shown while Luna is one of your launch buttons; change them with 'Chutdown: Choose Models')", "icon": { "light": "media/letter-l-openai-light.svg", "dark": "media/letter-l-openai-dark.svg" } },
+      { "command": "chutdown.newClaudeSlot8", "title": "mini (Codex) - small, fast and cost-efficient: simple, well-scoped coding tasks. Opens a codex terminal. (Editor title icon - shown while mini is one of your launch buttons; change them with 'Chutdown: Choose Models')", "icon": { "light": "media/letter-m-openai-light.svg", "dark": "media/letter-m-openai-dark.svg" } }
     ],
     "terminal": {
       "profiles": [
@@ -66,6 +75,7 @@
         { "command": "chutdown.focusTerminal", "when": "false" },
         { "command": "chutdown.openTranscript", "when": "false" },
         { "command": "chutdown.showSession", "when": "false" },
+        { "command": "chutdown.closeTab", "when": "false" },
         { "command": "chutdown.dismissSession", "when": "false" },
         { "command": "chutdown.copySession", "when": "false" },
         { "command": "chutdown.renameSession", "when": "false" },
@@ -73,13 +83,21 @@
         { "command": "chutdown.newClaudeSlot1", "when": "false" },
         { "command": "chutdown.newClaudeSlot2", "when": "false" },
         { "command": "chutdown.newClaudeSlot3", "when": "false" },
-        { "command": "chutdown.newClaudeSlot4", "when": "false" }
+        { "command": "chutdown.newClaudeSlot4", "when": "false" },
+        { "command": "chutdown.newClaudeSlot5", "when": "false" },
+        { "command": "chutdown.newClaudeSlot6", "when": "false" },
+        { "command": "chutdown.newClaudeSlot7", "when": "false" },
+        { "command": "chutdown.newClaudeSlot8", "when": "false" }
       ],
       "editor/title": [
-        { "command": "chutdown.newClaudeSlot1", "group": "navigation@-104", "when": "chutdown.slot1" },
-        { "command": "chutdown.newClaudeSlot2", "group": "navigation@-103", "when": "chutdown.slot2" },
-        { "command": "chutdown.newClaudeSlot3", "group": "navigation@-102", "when": "chutdown.slot3" },
-        { "command": "chutdown.newClaudeSlot4", "group": "navigation@-101", "when": "chutdown.slot4" }
+        { "command": "chutdown.newClaudeSlot1", "group": "navigation@-108", "when": "chutdown.slot1" },
+        { "command": "chutdown.newClaudeSlot2", "group": "navigation@-107", "when": "chutdown.slot2" },
+        { "command": "chutdown.newClaudeSlot3", "group": "navigation@-106", "when": "chutdown.slot3" },
+        { "command": "chutdown.newClaudeSlot4", "group": "navigation@-105", "when": "chutdown.slot4" },
+        { "command": "chutdown.newClaudeSlot5", "group": "navigation@-104", "when": "chutdown.slot5" },
+        { "command": "chutdown.newClaudeSlot6", "group": "navigation@-103", "when": "chutdown.slot6" },
+        { "command": "chutdown.newClaudeSlot7", "group": "navigation@-102", "when": "chutdown.slot7" },
+        { "command": "chutdown.newClaudeSlot8", "group": "navigation@-101", "when": "chutdown.slot8" }
       ]
     },
     "configuration": {
@@ -110,6 +128,46 @@
           "type": "number",
           "default": 2,
           "description": "How long a session WAITING ON YOU holds the armed power action back — a pending question, a plan approval, a permission prompt (read from Claude Code's own status file, which is the only place a question appears until it is answered). The machine will not power off over a live question, but it does not wait all night for one either: after this many minutes the question is treated as abandoned and stops counting. 0 = questions never hold the shutdown up. The lights are unaffected — a session waiting on you is 🟠 for as long as it is waiting — and the sound and popup gears still fire, since being asked something is exactly when you want to be called back."
+        },
+        "chutdown.autoAnswerShutdown": {
+          "type": "boolean",
+          "default": true,
+          "description": "While the gear is ARMED, answer a prompt that nobody comes back for. A session blocked on a question, a plan or a permission prompt stops dead until a human presses a key — which is right while you are there and useless when you are not, since the armed gear's whole premise is that you walked away. After `autoAnswerMinutes` untouched, Chutdown types ONE Enter into that session's tab, taking whichever option the dialog has highlighted: the first one, and by convention the recommended one. Nothing else is ever typed — no arrow keys, no text, no second press — and only the window whose tab it is can do it. What gets answered is `autoAnswerScope`, which defaults to everything, PERMISSION PROMPTS INCLUDED, and what a permission prompt has highlighted is yes: with this on and the scope left alone, Claude may be granted a tool you were not there to approve. Set the scope to \"questions\" to keep it to multiple-choice questions only. The light's hover says what is going to happen and counts down to it; every answer is a line in View → Output → Chutdown."
+        },
+        "chutdown.autoAnswerNotify": {
+          "type": "boolean",
+          "default": false,
+          "description": "The same for the NOTIFY gear: answer a prompt nobody comes back for, after `autoAnswerMinutes`, with the option the dialog has highlighted. Off by default — notify is the gear that fetches you rather than the one that carries on without you, so a popup saying \"come and look\" and a keystroke sent on your behalf are usually not both wanted. See `autoAnswerShutdown` for exactly what is typed and `autoAnswerScope` for what it is allowed to be typed into."
+        },
+        "chutdown.autoAnswerSound": {
+          "type": "boolean",
+          "default": false,
+          "description": "The same for the SOUND gear. Off by default — a chime is for someone within earshot, and someone within earshot can answer their own questions. See `autoAnswerShutdown` for exactly what is typed and `autoAnswerScope` for what it is allowed to be typed into."
+        },
+        "chutdown.autoAnswerOff": {
+          "type": "boolean",
+          "default": false,
+          "description": "The same with NO gear engaged — a run you leave going overnight without wanting a chime, a popup or the machine off at the end of it. Off by default. See `autoAnswerShutdown` for exactly what is typed and `autoAnswerScope` for what it is allowed to be typed into."
+        },
+        "chutdown.autoAnswerMinutes": {
+          "type": "number",
+          "default": 5,
+          "description": "How long a prompt is left for a HUMAN before the gears above answer it. Its own number rather than `questionMinutes`: that one is how long the armed shutdown waits behind a question before treating it as abandoned, and wanting the power-off to give up after 2 minutes is not the same as wanting a keystroke sent after 2 minutes. 0 answers as soon as the prompt is seen, which leaves you no window to answer it yourself. Counted from when Claude Code's own status file said the session started waiting, so it does not restart when the poll happens to notice."
+        },
+        "chutdown.autoAnswerScope": {
+          "type": "string",
+          "enum": ["all", "questions"],
+          "enumDescriptions": [
+            "Anything a session is blocked on: multiple-choice questions, plan approvals, permission prompts, sandbox and worker requests. Unattended approval — a permission prompt's highlighted option is yes.",
+            "Multiple-choice questions only. Permission prompts, plan approvals and sandbox requests are left exactly as they are today."
+          ],
+          "default": "all",
+          "description": "WHAT the gears above may answer. Which kind of prompt is on screen is not guessed: Claude Code writes `waitingFor` beside its `waiting` status in its own session file — \"input needed\" for a question with options, \"permission prompt\" for a tool permission or a plan approval, plus \"sandbox request\", \"worker request\", \"goal proposal\" and \"dialog open\" — and that is what this filters on. \"all\" is the setting for a run that must not stop for anything; \"questions\" is the one that keeps a human in front of every grant, since a question's highlighted option is a recommendation while a permission prompt's is a yes."
+        },
+        "chutdown.shellMinutes": {
+          "type": "number",
+          "default": 60,
+          "description": "How long a BACKGROUND SHELL holds its session unfinished — a Bash command Claude left running when the turn ended, started with `run_in_background` or moved there when it outran its timeout. Claude Code is re-invoked when that command exits, so the session is not done at all: its light goes 🟡 (\"a background shell is still running\") rather than 🔴 — its own colour, because every 🟠 in the bar means YOU are what a session is waiting for and this one means nothing is wanted from you — and the sound, the popup and the armed power action all wait — a ten-minute build no longer chimes at minute one or powers the machine off at minute three. Read from the command's own output file under the temp dir, whose last line is \"[exited with code N]\" once it is over, on a clean exit, a failure and a kill alike; no process is inspected and nothing is platform-specific. The cap is what stops a dev server that never exits from holding a light orange, and the machine awake, all night: past this many minutes the shell stops counting, measured from when the turn ended rather than from the file (a quiet server never touches it). 0 = background shells hold nothing, which is how every version before this one behaved. A session WAITING ON YOU is never held by this — being asked something is exactly when you want the chime."
         },
         "chutdown.countdownPopup": {
           "type": "boolean",
@@ -161,17 +219,17 @@
           "type": "array",
           "items": { "type": "string" },
           "default": ["opus = claude-opus-5", "fable = claude-fable-5", "sonnet = claude-sonnet-5", "haiku = claude-haiku-4-5"],
-          "description": "One status bar launch button per entry, wearing that model's letter mark - the same O / F / S / H the editor title bar uses, or a $(sparkle) for a model outside the catalog. Each entry is 'label = model' (model is passed to 'claude --model'), or just a model id used as both. Empty list falls back to a single plain 'claude' button. The default list is trimmed to the models your Claude plan reports (a plan without Fable, and without usage credits switched on, gets no Fable button); a list you pick yourself is used exactly as written. Rather than editing this by hand, run 'Chutdown: Choose Models' (or the link in any launch button's hover) to tick the models you want - the hover on each button says what that model is best used for."
+          "description": "One status bar launch button per entry, wearing that model's letter mark - the same letters the editor title bar uses: O / F / S / H in ORANGE for the Claude models, S / T / L / M in BLUE for the OpenAI ones (Sol and Sonnet share the S; the colour tells them apart), or a $(sparkle) for a model outside the catalog. Each entry is 'label = model', or just a model id used as both. A Claude model id is passed to 'claude --model'; an OpenAI one (gpt-*, o3/o4, codex*) opens a codex terminal with 'codex -m' instead - a plain tab with a blue letter, no traffic light and no auto-rename, since those read Claude Code's session files. Empty list falls back to a single plain 'claude' button. The default list is trimmed to the models your Claude plan reports (a plan without Fable, and without usage credits switched on, gets no Fable button); a list you pick yourself is used exactly as written. Rather than editing this by hand, run 'Chutdown: Choose Models' (or the link in any launch button's hover) to tick the models you want - the hover on each button says what that model is best used for."
         },
         "chutdown.editorTitleButtons": {
           "type": "boolean",
           "default": true,
-          "description": "Also show the model launch buttons top-right in the editor title bar, leftmost in that row (first four claudeButtons entries: O / F / S / H letter icons in entry order)."
+          "description": "Also show the model launch buttons top-right in the editor title bar, leftmost in that row: one letter icon per catalog model among your claudeButtons, in catalog order - O / F / S / H in orange for the Claude models, then S / T / L / M in blue for the OpenAI ones. A hand-typed model outside the catalog gets no icon here. VS Code draws at most seven extension icons in that row: with all eight catalog models ticked, the eighth (the blue M) is filed under the row's ... menu instead - untick any one model and it comes back up. The status bar buttons have no such cap."
         },
         "chutdown.statusBarBudget": {
           "type": "number",
           "default": 120,
-          "description": "How much room (roughly, in characters) the launch buttons, session lights and batch terminal lights may take in the status bar before they start to compact. Over it they shrink in steps, all three together: the launch buttons drop their words and keep their letters (O, F, S, H), then the session and terminal names are cut to 8 and then 5 characters, then the session lights become bare traffic lights, and finally the terminal lights do too. Whatever a light stops saying, its hover still says in full. The bar's real width cannot be read, so this is an estimate — raise it on a wide screen, lower it on a laptop. 0 = never compact; 1 = always as compact as it gets."
+          "description": "How much room (roughly, in characters) the launch buttons, session lights and batch terminal lights may take in the status bar before they start to compact. Over it they shrink in steps, all three together: the launch buttons drop their words and keep their letters (O, F, S, H - and the blue S, T, L, M), then the session and terminal names are cut to 8 and then 5 characters, then the session lights become bare traffic lights, and finally the terminal lights do too. Whatever a light stops saying, its hover still says in full. The bar's real width cannot be read, so this is an estimate — raise it on a wide screen, lower it on a laptop. 0 = never compact; 1 = always as compact as it gets."
         },
         "chutdown.aiNames": {
           "type": "boolean",

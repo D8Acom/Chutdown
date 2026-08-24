@@ -217,12 +217,13 @@ function activate(context) {
         vscode.commands.registerCommand('chutdown.pickModels', () => {
             claude.pickModels().catch((e) => shared.nlog('pickModels: ' + e.message));
         }),
-        vscode.commands.registerCommand('chutdown.newClaudeSlot1', () => claude.newClaudeSlot(0)),
-        vscode.commands.registerCommand('chutdown.newClaudeSlot2', () => claude.newClaudeSlot(1)),
-        vscode.commands.registerCommand('chutdown.newClaudeSlot3', () => claude.newClaudeSlot(2)),
-        vscode.commands.registerCommand('chutdown.newClaudeSlot4', () => claude.newClaudeSlot(3)),
+        // One editor-title command per catalog position (package.json declares the same
+        // count, each with its own letter icon): 1-4 the Claude models, 5-8 the OpenAI ones.
+        ...Array.from({ length: claude.TITLE_SLOTS }, (_, i) =>
+            vscode.commands.registerCommand('chutdown.newClaudeSlot' + (i + 1), () => claude.newClaudeSlot(i))),
         vscode.commands.registerCommand('chutdown.showTabs', lights.showTabs),
         vscode.commands.registerCommand('chutdown.showSession', claude.showSession),
+        vscode.commands.registerCommand('chutdown.closeTab', claude.closeTab),
         vscode.commands.registerCommand('chutdown.showStale', lights.showStale),
         vscode.commands.registerCommand('chutdown.showHistory', () => {
             lights.showHistory().catch((x) => shared.nlog('showHistory: ' + x.message));
@@ -251,8 +252,12 @@ function activate(context) {
         // loaded - or one whose light moved on while it sat in the background - is
         // stamped without having to be clicked first.
         vscode.commands.registerCommand('chutdown.refreshTabNames', () => {
+            // The marks first - a tab wearing the wrong letter is reopened wearing the
+            // right one (claude.refreshTabMarks), born titled; then the flick for the rest.
+            let marks = 0;
+            try { marks = claude.armTabMarks('asked for'); } catch (e) { shared.nlog('marks: ' + e.message); }
             claude.sweepTabTitles('asked for').then((n) => {
-                if (!n) vscode.window.setStatusBarMessage('Chutdown: every claude tab already named', 3000);
+                if (!n && !marks) vscode.window.setStatusBarMessage('Chutdown: every claude tab already named', 3000);
             }, (e) => shared.nlog('rename: sweep - ' + e.message));
         }),
         vscode.commands.registerCommand('chutdown.openUsagePage', () =>
@@ -284,7 +289,7 @@ function activate(context) {
                     shellPath: sh.shellPath,
                     shellArgs: sh.shellArgs,
                     cwd: root,
-                    iconPath: shared.claudeIcon(),   // the Chutdown "C" on the tab
+                    ...shared.tabMark(''),   // the Chutdown "C" on the tab
                     location: claude.claudeLocation(),
                     env: { CLAUDE_CODE_DISABLE_TERMINAL_TITLE: '1' }
                 });
@@ -298,7 +303,8 @@ function activate(context) {
             if (platform.isClaudeProfileTerminal(o))
                 claude.trackClaude(t, typeof o.cwd === 'object' && o.cwd ? o.cwd.fsPath : (o.cwd || shared.firstRoot()),
                     o.location === vscode.TerminalLocation.Editor ||
-                    (o.location && typeof o.location === 'object' && 'viewColumn' in o.location));
+                    (o.location && typeof o.location === 'object' && 'viewColumn' in o.location),
+                    { letter: '' });   // the profile wears the Chutdown "C" (no model pin)
         })
     );
 

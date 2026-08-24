@@ -24,7 +24,10 @@
 
 <img src="media/screenshots/editor-buttons.png" width="790" alt="The O / F / S / H buttons top right in the editor title bar, with the F button's hover: Fable - the most capable model, and the priciest">
 
-*One click per model, 2x faster loading time and 100x faster than running /models.*
+*One click per model, 2x faster loading time and 100x faster than running /models.
+Claude models wear orange letters and open `claude --model`; the OpenAI ones (Sol, Terra,
+Luna, mini — tick them in the picker) wear blue letters and open a `codex -m` terminal,
+so the two S buttons — Sonnet and Sol — are never mistaken for each other.*
 [Details →](docs/MANUAL.md#claude-tabs-with-renamed-titles--the-launch-buttons)
 
 ## View usage instantly
@@ -46,6 +49,16 @@ number you can see.*
 4. turn off computer. 
 
 read from the transcript's own `stop_reason`, never guessed from silence.*
+
+*A command Claude left running in the background counts as unfinished too — Claude is
+re-invoked when it exits — so a build in flight keeps its light 🟡 and holds all three
+gears, for up to `chutdown.shellMinutes` (default 60).*
+
+*And a session that stops to ask something need not stop the night: with the gear **armed**
+Chutdown answers for you after `chutdown.autoAnswerMinutes` (default 5) — one Enter, taking
+the option the dialog has highlighted. On by default for the armed gear only, opt-in for
+the other three, and `chutdown.autoAnswerScope: "questions"` keeps it away from permission
+prompts and plans. Both hovers say what is about to be pressed, and when.*
 [Details →](docs/MANUAL.md#power-status-off--sound--notify--shutdown)
 
 ## The footer bar — every session at a glance
@@ -55,9 +68,10 @@ read from the transcript's own `stop_reason`, never guessed from silence.*
 *See all your claude tasks and status: 
 1. 🟢 Processing task. 
 2. 🟠 Requires prompt. 
-3. 🔴 Task has finished.
+3. 🟡 A command it started is still running — it will pick itself back up. 
+4. 🔴 Task has finished.
 
-Hover to see the task details — the latest output, plus the prompt it started on and the one you last sent; click to jump to it. Initial tasks are renamed based on the initial prompt.*
+Hover to see the task details — the latest output, plus the prompt it started on and the one you last sent; click to jump to it. The hover's links copy it, rename it, open its raw transcript, and — when the session has a tab in this window — **close that tab**, which folds the light into *idle* without losing anything. Initial tasks are renamed based on the initial prompt.*
 [Details →](docs/MANUAL.md#traffic-lights--one-clickable-entry-per-session)
 
 *On a crowded afternoon the bar compacts itself rather than falling off the right edge:
@@ -120,7 +134,8 @@ in the hover.*
 
 ***Choose models** — Choose what models you want to show and hover to see their use-case.*
 *The buttons you start with follow your plan — no Fable button on a Pro account with no
-usage credits — and the picker still lets you tick anything.*
+usage credits — and the picker still lets you tick anything, including the four OpenAI
+models under their own heading (blue letters, launched with `codex -m`).*
 [Details →](docs/MANUAL.md#claude-tabs-with-renamed-titles--the-launch-buttons)
 
 ## Install

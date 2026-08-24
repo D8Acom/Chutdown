@@ -17,9 +17,13 @@ const density = require('./density');
 const { parseTerminalsFile, sampleJson } = require('./terminals');
 
 const isClaudeCommand = (cmd) => /^\s*claude(\s|$)/i.test(String(cmd || ''));
+// A `codex` entry is not a managed claude tab (no light, no rename), but it can still
+// wear its model's blue letter the way a button-launched one does.
+const isCodexCommand = (cmd) => /^\s*codex(\s|$)/i.test(String(cmd || ''));
 // A batch entry names its model on the command line, so its tab can wear that model's
-// letter like a button-launched one: `claude --model claude-opus-5` -> the O.
-const claudeModelArg = (cmd) => (String(cmd || '').match(/--model[= ]\s*([^\s]+)/i) || [])[1] || '';
+// letter like a button-launched one: `claude --model claude-opus-5` -> the O,
+// `codex -m gpt-5.6-sol` -> the blue S.
+const claudeModelArg = (cmd) => (String(cmd || '').match(/(?:--model|-m)[= ]\s*([^\s]+)/i) || [])[1] || '';
 
 /// How long to give a terminal to report shell integration before concluding it has
 /// none. VS Code activates it a moment after the shell starts, so "not there yet" and
@@ -72,13 +76,24 @@ function runIn(terminal, command, rec) {
 /// the title, and the traffic-light name only held while that tab was the active one.
 function makeTerminal(name, cwd, command) {
     const isClaude = isClaudeCommand(command);
+    const isCodex = isCodexCommand(command);
+    const model = claudeModelArg(command);
+    const mark = isClaude ? shared.tabMark(claude.modelLetter(model), claude.modelVendor(model))
+        : isCodex ? claude.codexMark(model)
+        : { iconPath: new vscode.ThemeIcon('server-process') };
     return vscode.window.createTerminal({
         name,
         cwd,
-        iconPath: isClaude ? shared.claudeIcon(claude.modelLetter(claudeModelArg(command)))
-            : new vscode.ThemeIcon('server-process'),
+        ...mark,
         env: isClaude ? { CLAUDE_CODE_DISABLE_TERMINAL_TITLE: '1' } : undefined
     });
+}
+
+/// ...and the same entry tracked as a claude tab, told which letter makeTerminal put on
+/// it (claude.refreshTabMarks compares that with what the session turns out to run).
+function trackClaudeTab(terminal, cwd, command) {
+    if (!isClaudeCommand(command)) return;
+    claude.trackClaude(terminal, cwd, false, { letter: claude.modelLetter(claudeModelArg(command)) });
 }
 
 /// The names a workspace folder is searched for, in order. `.terminals` is THE file -
@@ -126,7 +141,7 @@ function entryPort(e) {
 function launchEntryRec(e, idx, cwd, port) {
     const terminal = makeTerminal(e.name, cwd, e.command);
     // A claude entry in .terminals gets the auto-rename + traffic-light title too.
-    if (isClaudeCommand(e.command)) claude.trackClaude(terminal, cwd);
+    trackClaudeTab(terminal, cwd, e.command);
 
     // The LIVE record for this name, not any snapshot a caller captured earlier:
     // termRecs is keyed by name, so the set() below replaces whatever is there, and
@@ -461,7 +476,7 @@ async function toggleTerminalBody(rec) {
         if (rec.port !== undefined && shared.cfg().get('freePortsOnStart') !== false)
             await killPort(rec.port).catch(() => 0);
         const terminal = makeTerminal(rec.name, rec.cwd, rec.command);
-        if (isClaudeCommand(rec.command)) claude.trackClaude(terminal, rec.cwd);
+        trackClaudeTab(terminal, rec.cwd, rec.command);
         rec.terminal = terminal;
         rec.exited = false; rec.ended = false; rec.exitCode = undefined;
         rec.portUp = undefined; rec.lines = []; rec.noIntegration = false;
@@ -552,7 +567,7 @@ async function restartRec(rec) {
         try { runIn(rec.terminal, rec.command, rec); } catch { }
     } else {
         const terminal = makeTerminal(rec.name, rec.cwd, rec.command);
-        if (isClaudeCommand(rec.command)) claude.trackClaude(terminal, rec.cwd);
+        trackClaudeTab(terminal, rec.cwd, rec.command);
         rec.terminal = terminal;
         rec.exited = false; rec.noIntegration = false;
         runIn(terminal, rec.command, rec);

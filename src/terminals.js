@@ -247,16 +247,22 @@ function parseTerminalsFile(text) {
 }
 
 /// The sample the button writes - strict JSON, so no editor anywhere underlines it in
-/// red. Its notes are `//`-prefixed KEYS, which is also how the four examples ship
-/// switched off: a file that launched four imaginary servers the moment it was created
+/// red. Its notes are `//`-prefixed KEYS, which is also how the two examples ship
+/// switched off: a file that launched two imaginary servers the moment it was created
 /// would be worse than an empty one, and "delete the `// ` from the front" is a
 /// shorter instruction than any comment syntax.
 ///
+/// They are also LABELLED as examples, in a note of their own directly above them.
+/// Off-by-`//` is only obvious to someone who has already read the note about `//`
+/// four lines up; "the two below are made-up" is obvious to someone skimming, which
+/// is what a file you have just created gets. Two rather than four for the same
+/// reason: the block is meant to be read, and then replaced.
+///
 /// The examples exist to settle the one thing that is easy to read wrong: the KEY IS A
 /// NAME, NOT A FOLDER. `"web": "npm run dev"` runs in the workspace root like every
-/// other entry with no `cwd`; the folder is the `cwd` field and nothing else. Hence a
-/// root one, a root one with a port, and two in subfolders - the last named nothing
-/// like its folder, so the two cannot be confused for each other.
+/// other entry with no `cwd`; the folder is the `cwd` field and nothing else. Hence one
+/// of each shape: a bare string in the root, and an object in a subfolder named nothing
+/// like it, so the two cannot be confused for each other.
 ///
 /// Half the notes are addressed to an AI AGENT, in those words, because it is the most
 /// frequent reader of this file and the one whose default move is wrong: told to bounce
@@ -292,7 +298,7 @@ function sampleJson(root) {
         note('the shapes', 'NAME: command   or   NAME: { cmd, cwd, port }'),
         note('the name', 'just a label - it names the terminal tab and its status bar light'),
         note('the folder', 'cwd, relative to this file. Without it an entry runs in the workspace root'),
-        note('a note, or an off switch', 'any key starting with // is ignored - like the four below'),
+        note('a note, or an off switch', 'any key starting with // is ignored - like the two below'),
         '',
         note('FOR THE AGENT WORKING HERE: how to reset one of these',
             'do not kill it and start your own copy in your own shell - that copy dies with your session and is invisible here. Run a line below instead and the editor restarts the entry itself: same terminal tab, port taken back first, light and log still pointing at it.'),
@@ -305,10 +311,10 @@ function sampleJson(root) {
         note('  on macOS, once', 'the Command Palette -> "Shell Command: Install \'code\' command in PATH", or `code` is not on PATH and these lines do nothing at all.'),
         note('...or from the editor', 'the Command Palette -> Chutdown: Restart All Terminals'),
         '',
-        '  "// dev": "npm run dev",',
-        '  "// web": { "cmd": "npm run dev", "port": 3000 },',
-        '  "// api": { "cmd": "npm run dev", "cwd": "packages/api", "port": 4000 },',
-        '  "// d8a": { "cmd": "npm start", "cwd": "D8A" }',
+        note('THE TWO BELOW ARE EXAMPLES',
+            'made-up entries, switched off by the // in front. Replace them with your own - or delete the "// " from one to try it.'),
+        '  "// web": "npm run dev",',
+        '  "// api": { "cmd": "npm start", "cwd": "packages/server", "port": 4000 }',
         '}',
         ''
     ].join('\n');

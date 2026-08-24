@@ -4,6 +4,7 @@
 // plus the scanned-word placeholder name.
 
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 
 const shared = require('./shared');
@@ -138,6 +139,13 @@ function cliStatuses() {
             // typed as /rename or `claude --name` (verified against the 2.1.235 CLI:
             // its pid-file writer drops every other source value on the floor).
             name: typeof rec.name === 'string' ? rec.name : '',
+            // WHAT it is waiting for, when it is waiting: the CLI writes `waitingFor`
+            // beside a `waiting` status - "input needed" for a question with options,
+            // "permission prompt" for a tool permission or a plan approval, and
+            // "sandbox request" / "worker request" / "goal proposal" / "dialog open"
+            // for the rest. Nothing here interprets it; it is passed through for the
+            // one caller that must tell a recommendation from a grant (answer.js).
+            waitingFor: typeof rec.waitingFor === 'string' ? rec.waitingFor : '',
             ownName: rec.nameSource === 'derived' || rec.nameSource === 'collision' });
     }
     return out;
@@ -156,6 +164,11 @@ function applyCliStatus(s, cli) {
         s.awaitingReply = s.tail.awaitingReply;
     }
     s.waiting = false;
+    s.waitingFor = '';
+    // The CLI's own word, kept as it came - '' when there is no fresh file. The tab-mark
+    // reopen (claude.refreshTabMarks) will not kill a claude whose own status file says
+    // anything but idle, whatever the transcript tail reads as.
+    s.cliStatus = cli ? cli.status : '';
     if (!cli) return;                       // no file: every rule below stays as it was
     if (s.state !== 'working') return;
     if (cli.status === 'waiting') {
@@ -164,6 +177,7 @@ function applyCliStatus(s, cli) {
         s.state = 'awaiting';
         s.question = true;
         s.waiting = true;
+        s.waitingFor = cli.waitingFor || '';
         s.awaitingReply = false;
         // Measured from when the CLI said so, not from the last write: the transcript
         // has not moved since before the question went up.
@@ -307,7 +321,17 @@ function scanSessions() {
                 // prompt stays in the hover. The whole question is SCANNED for a
                 // distinctive word (not just whatever happens to be first - that gave
                 // tabs named "the"); the AI namer then VERIFIES it after the first turn.
-                s.prompt = firstPrompt(file);
+                const head = readHead(file);
+                s.prompt = head.prompt;
+                // Where the session was LAUNCHED - the first record's cwd, which is
+                // also the folder its transcript is filed under. s.cwd is the newest
+                // record's, and that follows the session's own Bash tool around: a
+                // session that cd'd into D8A and worked there is stamped D8A, and a
+                // resume opened in THAT folder wears "D8A" on its tab (VS Code's
+                // ${cwdFolder} description, shown whenever a terminal's cwd is not the
+                // workspace root) and files its work under a project it never belonged
+                // to. Anything that opens a terminal FOR a session starts it here.
+                if (!s.home && head.cwd) s.home = head.cwd;
                 const cached = naming.cachedName(id);
                 if (cached) {
                     s.name = shared.uniqueName(id, cached);
@@ -369,6 +393,22 @@ function scanSessions() {
                 if ((s.lastSideMs || 0) > s.lastWriteMs) s.lastWriteMs = s.lastSideMs;
                 s.background = false;
             }
+
+            // A background SHELL - a `run_in_background` Bash call, or a foreground one
+            // moved to the background when it outran its timeout - runs on with the turn
+            // over, and re-invokes Claude when it exits. Asked only of a session that is
+            // AWAITING (a working one is busy already) and only while the cap is open,
+            // and then only when there is something new to find out: a shell can be
+            // STARTED only by a turn, and starting one writes the record announcing it,
+            // so an unmoved transcript cannot have grown a shell since the last look.
+            // One we already believe is live IS re-walked every scan - that is how its
+            // exit is noticed for a session whose window went away before it landed.
+            if (s.state === 'awaiting' && shellFresh(s)) {
+                if (s.shell || s.shellWalked !== st.mtimeMs) {
+                    s.shellWalked = st.mtimeMs;
+                    s.shell = liveShells(s);
+                }
+            } else s.shell = 0;
 
             // VERIFY the scanned word AFTER the first turn completes - the assistant's
             // answer says what the task really is, so the namer keeps the word if it
@@ -586,6 +626,7 @@ function parseTailWindow(s, bytes, meta) {
     let decided = false;
     let prompt = '';
     let extra = 0;
+    let exhausted = false;      // the lookback ran out before the window did
     // THE MODEL, straight from the transcript. Every assistant record names the model
     // that wrote it, so the session says what is actually running in it - including a
     // mid-session /model switch, which nothing on our side ever sees. Lines arrive
@@ -599,7 +640,7 @@ function parseTailWindow(s, bytes, meta) {
     // workspace. Newest-first, so the first one wins.
     let gotCwd = false;
     for (const line of readTailLines(s.file, bytes, meta)) {
-        if (decided && ++extra > PROMPT_LOOKBACK) break;
+        if (decided && ++extra > PROMPT_LOOKBACK) { exhausted = true; break; }
         let rec;
         try { rec = JSON.parse(line); } catch { continue; }
         if (!rec || typeof rec !== 'object') continue;
@@ -639,13 +680,10 @@ function parseTailWindow(s, bytes, meta) {
 
         const trimmed = String(text || '').trim();
         const interrupted = /^\[Request interrupted by user/.test(trimmed);
-        // What the USER typed, as opposed to what the CLI wrote as a user record: not a
-        // mid-turn tool_result, not the interrupt marker below, not an attachment or a
-        // wrapper blob (firstPrompt skips a leading '<' for the same reason). Captured
-        // before the verdict block, so a prompt that IS the newest record still counts.
-        if (!prompt && rec.type === 'user' && !hasToolResult && !interrupted &&
-            trimmed && !trimmed.startsWith('<'))
-            prompt = shared.flat(text, 200);
+        // What the USER typed, as opposed to what the CLI wrote as a user record
+        // (typedPrompt). Captured before the verdict block, so a prompt that IS the
+        // newest record still counts.
+        if (!prompt) prompt = typedPrompt(rec);
         if (decided) { if (prompt && gotModel) break; continue; }
 
         s.lastText = shared.flat(text, 800);
@@ -683,9 +721,92 @@ function parseTailWindow(s, bytes, meta) {
     if (!decided) return false;
     // Nothing typed inside the window (or inside PROMPT_LOOKBACK of the tail) means the
     // last prompt is OLDER than what was read, not that there isn't one - so keep
-    // whatever an earlier parse found rather than blanking the hover mid-turn.
-    if (prompt) s.lastPrompt = prompt;
+    // whatever an earlier parse found rather than blanking the hover mid-turn...
+    if (prompt) { s.lastPrompt = prompt; s.promptKnownAt = meta.size; return true; }
+    // ...and when nothing earlier was found either, GO AND LOOK. On this machine most
+    // live transcripts have no typed prompt anywhere in the last 256 KB - a single
+    // tool-heavy turn is bigger than the window - so a session first seen mid-turn (a
+    // reload, a restart, a resume) never got its "Latest" line at all, and the hover
+    // collapsed to the opening prompt for the rest of the day. The back-scan reads
+    // older 256 KB slabs until it meets a prompt, and is paid for ONCE per window of
+    // growth: promptKnownAt is the size the newest prompt is known up to, and the
+    // window covers everything since it until the file has grown by another window.
+    // It starts where the window left off - or at the very end when the lookback gave
+    // up before the window did, since the prompt may then still be INSIDE the window.
+    if ((meta.truncated || exhausted) &&
+        (s.promptKnownAt === undefined || meta.size - s.promptKnownAt > bytes)) {
+        const older = exhausted ? olderPrompt(s.file, meta.size, null)
+                                : olderPrompt(s.file, meta.size - bytes, meta.partial);
+        if (older) s.lastPrompt = older;
+        s.promptKnownAt = meta.size;
+    }
     return true;
+}
+
+/// What the USER typed, as opposed to what the CLI wrote as a `user` record: not a
+/// subagent's, not a mid-turn tool_result, not a local slash command's echo or the
+/// CLI's meta records, not the interrupt marker, not an attachment or a wrapper blob
+/// (firstPrompt skips a leading '<' for the same reason). The one rule for both the
+/// tail window and the back-scan behind it, flattened to the 200 characters a hover
+/// line holds. '' for anything else.
+function typedPrompt(rec) {
+    if (!rec || rec.type !== 'user' || rec.isSidechain === true || rec.isMeta === true) return '';
+    const msg = rec.message;
+    if (!msg || typeof msg !== 'object') return '';
+    const content = msg.content;
+    let text = '';
+    if (typeof content === 'string') text = content;
+    else if (Array.isArray(content))
+        for (const block of content) {
+            if (!block || typeof block !== 'object') continue;
+            if (block.type === 'tool_result') return '';
+            if (block.type === 'text' && typeof block.text === 'string') text += block.text;
+        }
+    const trimmed = text.trim();
+    if (!trimmed || trimmed.startsWith('<') || /^\[Request interrupted by user/.test(trimmed)) return '';
+    return shared.flat(text, 200);
+}
+
+/// The newest typed prompt OLDER than byte offset `end` of a transcript - the part the
+/// tail window did not reach. Read backwards a slab at a time (the window's size), and
+/// stop at the first prompt met, so the usual cost is one slab; capped at
+/// TAIL_RETRY_BYTES back from `end` for the same reason the state retry is. `carry` is
+/// the head-less line the window cut through at `end` (readTailLines hands its tail
+/// back as meta.partial): joined to the bytes before `end` it is a whole record again,
+/// and it is joined as BYTES, not text, because a slab edge can fall inside a UTF-8
+/// character. '' when nothing typed is found that far back, or the file cannot be read.
+function olderPrompt(file, end, carry) {
+    carry = Buffer.isBuffer(carry) ? carry : Buffer.from(String(carry || ''), 'utf8');
+    const floor = Math.max(0, end - TAIL_RETRY_BYTES);
+    let fd;
+    try { fd = fs.openSync(file, 'r'); } catch { return ''; }
+    try {
+        let hi = end;
+        while (hi > floor) {
+            const lo = Math.max(floor, hi - TAIL_BYTES);
+            const buf = Buffer.alloc(hi - lo);
+            const n = fs.readSync(fd, buf, 0, hi - lo, lo);
+            let cut = n;
+            for (let i = n - 1; i >= 0; i--) {
+                if (buf[i] !== 0x0a) continue;
+                const p = promptIn(Buffer.concat([buf.subarray(i + 1, cut), carry]));
+                if (p) return p;
+                carry = Buffer.alloc(0);
+                cut = i;
+            }
+            carry = Buffer.concat([buf.subarray(0, cut), carry]);
+            if (lo === 0) return promptIn(carry);   // the file's first line, whole
+            hi = lo;
+        }
+    } catch { /* fall through */ } finally { try { fs.closeSync(fd); } catch { /* closed */ } }
+    return '';
+}
+function promptIn(lineBuf) {
+    const t = lineBuf.toString('utf8').trim();
+    if (!t.startsWith('{')) return '';
+    let rec;
+    try { rec = JSON.parse(t); } catch { return ''; }
+    return typedPrompt(rec);
 }
 
 // ------------------------------------------------------- background agents
@@ -734,7 +855,8 @@ function backgroundBusy(s, sideDir, transcriptMs) {
     return busy || (newestDone > transcriptMs && now - newestDone < NOTIFY_GRACE_MS);
 }
 
-/// One authoritative sidecar walk for the given sessions, ignoring the window above.
+/// One authoritative walk for the given sessions - sidecars AND background shells -
+/// ignoring the window above.
 ///
 /// That window is right for the lights - past SIDECAR_WINDOW_MS of total silence
 /// nothing under there can be alive, so the walk stops and the cost goes away. But it
@@ -761,6 +883,13 @@ function recheckBackground(sessions) {
         try { mainMs = fs.statSync(s.file).mtimeMs; } catch { }
         s.background = backgroundBusy(s, sideDir, mainMs);
         if (s.background) busy = true;
+        // The background SHELLS, on the same terms and for the same reason: the scan asks
+        // only while the transcript is moving or a shell is already known to be live, and
+        // this is the one caller that cannot afford to be a poll behind - it is what
+        // stands between an armed gear and a machine powering off mid-build.
+        if (s.state === 'awaiting' && shellFresh(s)) s.shell = liveShells(s);
+        else s.shell = 0;
+        if (shellBusy(s)) busy = true;
     }
     return busy;
 }
@@ -818,9 +947,121 @@ function agentWorking(file) {
     return false;    // empty or unreadable - nothing to wait for
 }
 
+// ------------------------------------------------------- background shells
+//
+// The Bash tool can leave a command RUNNING after the turn that started it has ended -
+// `run_in_background`, or a foreground call that outran its timeout and was moved to the
+// background. Claude Code writes each one's output to
+//
+//   <tmpdir>/claude/<project>/<sessionId>/tasks/<id>.output
+//
+// ...and is RE-INVOKED when the process exits, which starts a whole new turn. So a
+// session sitting at 'awaiting' with a live shell under it is not finished at all: the
+// build is still running, and there is more work coming the moment it ends. The
+// transcript says none of that - the exit notification is the first record about it -
+// which is how the chime fired one minute into a ten-minute build, and how the armed
+// shutdown powered the machine off in the middle of one.
+//
+// A command that is OVER leaves "[exited with code N]" as the last line of its file - on a
+// clean exit, on a non-zero one, and on a kill alike (all three checked against the real
+// CLI). A live one has no such line, and an empty file is a command that has not printed
+// anything yet. That last line is the whole test: no process list, no pid, nothing
+// platform-specific.
+//
+// The hold is capped by `shellMinutes` - a dev server writes nothing and exits never, and
+// one of those must not hold a light orange, or the machine awake, for the rest of the day.
+
+/// The last line a finished command's output file ends with.
+const EXITED = /\[exited with [^\]\n]{0,60}\]\s*$/;
+
+/// Where this session's background commands write. <project> is the flattened cwd the
+/// transcript is filed under, taken from the DIRECTORY the transcript was found in rather
+/// than re-flattened from s.cwd - which follows the session's own `cd` around and would
+/// name a folder the CLI never filed anything under.
+function taskDir(s) {
+    return path.join(os.tmpdir(), 'claude', path.basename(s.dir || ''), s.id, 'tasks');
+}
+
+/// How long a live background shell may hold its session unfinished. 0 turns the whole
+/// thing off - background shells then hold nothing, as they did before this existed.
+function shellMs() {
+    const n = Number(shared.cfg().get('shellMinutes'));
+    return Math.max(0, isFinite(n) ? n : 60) * 60_000;
+}
+
+/// Is the cap still open? Measured from when the TURN ENDED, not from the output file's
+/// own mtime: a quiet dev server never moves its file, and "it stopped printing" is not
+/// "it stopped running". So the shell holds for shellMinutes after the session finished,
+/// which is also what bounds the walk below - past the cap there is nothing to find out.
+function shellFresh(s) {
+    const cap = shellMs();
+    return cap > 0 && Date.now() - (s.awaitingSince || s.lastWriteMs || 0) < cap;
+}
+
+/// Is a background shell holding this session? The count comes from the scan; the cap and
+/// the one exception are applied here, so the lights, the gears and the last check before
+/// the power action all read the same rule.
+function shellBusy(s) {
+    if (!s || !s.shell) return false;
+    // ...except a session that is WAITING ON YOU. A question, a plan or a permission
+    // prompt needs an answer NOW, and holding the chime back for the build behind it
+    // would be holding it back from the one thing it exists to call you to - the same
+    // reading questions already get everywhere else (shutdown.js: they chime, and they
+    // hold the power action for questionMinutes rather than for this).
+    if (s.waiting || s.question) return false;
+    return shellFresh(s);
+}
+
+/// How many of this session's background commands are still running. One readdir, plus a
+/// 256-byte tail read per file that has CHANGED since the last look - a session with a dev
+/// server under it is asked this five times a minute for as long as the server runs, on
+/// the extension host thread.
+function liveShells(s) {
+    const dir = taskDir(s);
+    let entries;
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return 0; }
+    const tails = new Map();
+    let live = 0;
+    for (const e of entries) {
+        if (e.isDirectory() || !e.name.endsWith('.output')) continue;
+        const file = path.join(dir, e.name);
+        let mtime = 0;
+        try { mtime = fs.statSync(file).mtimeMs; } catch { continue; }
+        const had = s.shellTails && s.shellTails.get(file);
+        const rec = had && had.mtime === mtime ? had : { mtime, live: !shellEnded(file) };
+        tails.set(file, rec);
+        if (rec.live) live++;
+    }
+    // REBUILT rather than added to: a session that has run a hundred commands must not
+    // carry a hundred dead entries around for the rest of the window.
+    s.shellTails = tails;
+    return live;
+}
+
+/// Is this command over? Only its last line answers that, and the file can be a build log
+/// megabytes long, so the end of it is all that is read.
+function shellEnded(file) {
+    let tail = '';
+    try {
+        const fd = fs.openSync(file, 'r');
+        try {
+            const size = fs.fstatSync(fd).size;
+            const want = Math.min(size, 256);
+            const buf = Buffer.alloc(want);
+            const n = want ? fs.readSync(fd, buf, 0, want, size - want) : 0;
+            tail = buf.toString('utf8', 0, n);
+        } finally { fs.closeSync(fd); }
+    } catch { return true; }   // unreadable is not evidence that anything is still running
+    return EXITED.test(tail);
+}
+
 /// The session's first real user prompt - it becomes the traffic light's name.
-function firstPrompt(file) {
+/// The first 64 KB of a transcript, read once: the opening prompt (the tab's first
+/// word comes from it) and the cwd of the first record that carries one - the folder
+/// the session was launched in (s.home). One read serves both.
+function readHead(file) {
     let head = '';
+    const out = { prompt: '', cwd: '' };
     try {
         const fd = fs.openSync(file, 'r');
         try {
@@ -828,14 +1069,17 @@ function firstPrompt(file) {
             const n = fs.readSync(fd, buf, 0, buf.length, 0);
             head = buf.toString('utf8', 0, n);
         } finally { fs.closeSync(fd); }
-    } catch { return ''; }
+    } catch { return out; }
 
     for (const line of head.split('\n')) {
         const t = line.trim();
         if (!t.startsWith('{')) continue;
         let rec;
         try { rec = JSON.parse(t); } catch { continue; }
-        if (!rec || rec.type !== 'user' || rec.isSidechain === true || rec.isMeta === true) continue;
+        if (!rec || typeof rec !== 'object') continue;
+        if (!out.cwd && typeof rec.cwd === 'string' && rec.cwd) out.cwd = rec.cwd;
+        if (out.prompt) { if (out.cwd) break; continue; }
+        if (rec.type !== 'user' || rec.isSidechain === true || rec.isMeta === true) continue;
         const content = rec.message && rec.message.content;
         let text = '';
         if (typeof content === 'string') text = content;
@@ -844,10 +1088,12 @@ function firstPrompt(file) {
                 if (block && block.type === 'text' && typeof block.text === 'string') text += block.text + ' ';
         text = shared.flat(text, 200);
         if (!text || text.startsWith('<')) continue;   // command/meta wrappers
-        return text;
+        out.prompt = text;
+        if (out.cwd) break;
     }
-    return '';
+    return out;
 }
+function firstPrompt(file) { return readHead(file).prompt; }
 
 function firstWord(prompt) {
     const w = String(prompt || '').split(/\s+/)[0] || '';
@@ -929,7 +1175,7 @@ function goodWord(prompt, id) {
 /// or ENOENT from a rotation between the statSync in scanSessions and this open are all
 /// ordinary on Windows, so the failure is stated rather than flattened into a verdict.
 function readTailLines(file, maxBytes, meta) {
-    if (meta) { meta.truncated = false; meta.failed = false; }
+    if (meta) { meta.truncated = false; meta.failed = false; meta.size = 0; meta.partial = null; }
     let text = '';
     let start = 0;
     try {
@@ -941,6 +1187,15 @@ function readTailLines(file, maxBytes, meta) {
             const buf = Buffer.alloc(take);
             const n = fs.readSync(fd, buf, 0, take, start);
             text = buf.toString('utf8', 0, n);
+            if (meta) {
+                meta.size = size;
+                // The line the window cut through: its tail is here, its head is in the
+                // bytes before `start`. Kept as bytes for olderPrompt to put back together.
+                if (start > 0) {
+                    const nl = buf.indexOf(0x0a);
+                    meta.partial = buf.subarray(0, nl < 0 || nl > n ? n : nl);
+                }
+            }
         } finally { fs.closeSync(fd); }
     } catch {
         // truncated as well as failed: "we did not reach the start of the file" is true
@@ -977,5 +1232,6 @@ function newestUnder(dir, cap = 1500) {
 }
 
 Object.assign(module.exports,
-    { scanSessions, underWorkspace, mayHoldOurs, noReplyAge, noReplyGaveUp, noReplyDead,
-      applyCliStatus, adoptCliName, recheckBackground, goodWord, goodWords, AGENT_DEAD_MS });
+    { scanSessions, underWorkspace, workspaceRoots, mayHoldOurs, noReplyAge, noReplyGaveUp, noReplyDead,
+      applyCliStatus, adoptCliName, recheckBackground, shellBusy, goodWord, goodWords, readHead,
+      AGENT_DEAD_MS });

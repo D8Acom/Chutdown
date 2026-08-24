@@ -9,6 +9,7 @@ const batch = require('./batch');
 const scan = require('./scan');
 const naming = require('./naming');
 const density = require('./density');
+const answer = require('./answer');
 
 const sessionItems = new Map(); // sessionId -> its own status bar traffic light
 // Session lights sit between the .terminals/stop buttons above them and the idle
@@ -45,8 +46,9 @@ function releasePrio(id) {
 }
 
 /// USER'S mapping: 🟢 working, 🟠 Claude asked a QUESTION (multiple-choice, plan
-/// approval, or a reply ending in "?") OR the turn was INTERRUPTED, 🔴 turn done -
-/// ready to reprompt.
+/// approval, or a reply ending in "?") OR the turn was INTERRUPTED, 🟡 nothing is wanted
+/// from you but the session is not done either - a background shell it started is still
+/// running and will bring Claude back when it exits, 🔴 turn done - ready to reprompt.
 function lightFor(s) {
     const working = s.state === 'working' || s.background;
     if (working) {
@@ -64,8 +66,23 @@ function lightFor(s) {
         // see a question until it has been answered (scan.js). This is the state that
         // used to sit here as 🟢 processing.
         if (s.waiting) return { e: '🟠', label: 'waiting on you - a question, a plan, or a permission prompt' };
-        return s.question ? { e: '🟠', label: 'asking a question' }
-                          : { e: '🔴', label: 'ready to reprompt' };
+        if (s.question) return { e: '🟠', label: 'asking a question' };
+        // The turn ended, but a command it started is STILL RUNNING - a background Bash
+        // call, or one moved to the background when it outran its timeout. Claude is
+        // re-invoked when that command exits, so this session is not done with you.
+        //
+        // 🟡, and its own colour deliberately: every other 🟠 in this function means YOU
+        // are the thing it is waiting for - a question, a plan, an interrupted turn, a
+        // prompt that got no reply - and this one means the exact opposite, that nothing
+        // is wanted from you and the session will start itself again. Sharing the orange
+        // would have made the one light in the bar that needs no attention look like the
+        // four that do. Behind the checks above for the same reason: those need you NOW.
+        // Capped by shellMinutes (scan.shellBusy), or a dev server would hold this
+        // yellow until the window closed.
+        if (scan.shellBusy(s))
+            return { e: '🟡', label: (s.shell > 1 ? s.shell + ' background shells are' : 'a background shell is') +
+                ' still running - Claude picks the session back up when it exits' };
+        return { e: '🔴', label: 'ready to reprompt' };
     }
     if (s.state === 'unparsed')
         return { e: '⚪', label: 'cannot read the end of the transcript - treating it as still working' };
@@ -163,7 +180,7 @@ function seedIdle() {
 /// working and makes the blast radius of an escaped one "a Chutdown light closes".
 const HOVER_COMMANDS = ['chutdown.copySession', 'chutdown.dismissSession',
                         'chutdown.dismissOrphans', 'chutdown.showSession',
-                        'chutdown.openTranscript', 'chutdown.renameSession',
+                        'chutdown.openTranscript', 'chutdown.renameSession', 'chutdown.closeTab',
                         'chutdown.setIdleMinutes', 'chutdown.setLookbackHours',
                         'chutdown.showHistory'];
 
@@ -273,6 +290,19 @@ function transcriptLink(s) {
         ' "Open the raw .jsonl this light is read from")';
 }
 
+/// The tab this light stands in front of, closed from the hover - next to Transcript,
+/// because a light with a tab here had no way OUT at all: `closeLinks` only retires a
+/// light that has no tab (closing that tab is the thing that retires it), so finishing
+/// with a session meant hunting its terminal down to close it by hand.
+/// Only drawn when there IS a tab in this window to close - claude.hasLocalTerminal,
+/// not `local`, so a shell revived empty by a quit (a tab, just not a running session)
+/// can be closed from here too.
+function closeTabLink(id) {
+    const arg = encodeURIComponent(JSON.stringify([id]));
+    return '[$(trash) Close tab](command:chutdown.closeTab?' + arg +
+        ' "Close this session\'s terminal tab - the session stays resumable")';
+}
+
 function closeLinks(id) {
     const arg = encodeURIComponent(JSON.stringify([id]));
     return '[$(close) Close](command:chutdown.dismissSession?' + arg + ')' +
@@ -282,8 +312,9 @@ function closeLinks(id) {
 /// VS Code gives extensions NO way to make a hover selectable - the widget dies the
 /// moment the pointer leaves it, so the assistant's last answer sitting in there was
 /// unreachable. This copies what the hover shows - name, state, quiet time, the first
-/// and latest prompt, and the latest output (the same 800-char tail scan.js keeps) - as
-/// plain text, plus the cwd and session id the hover has no room for.
+/// and latest prompt, and the latest output (the whole 800-char tail scan.js keeps,
+/// where the hover shows a line of it) - as plain text, plus the cwd and session id
+/// the hover has no room for.
 async function copySession(id) {
     const s = shared.sessions.get(id);
     if (!s) return;
@@ -368,6 +399,13 @@ function dismissOrphans() {
     renderSessions();
     vscode.window.setStatusBarMessage('Closed ' + n + ' session light(s) - still listed under "idle".', 4000);
 }
+
+/// How much of the latest answer the hover shows. scan.js keeps 800 characters (the
+/// Copy link and the AI namer want them), but 800 characters of answer in the hover
+/// was a block you read INSTEAD of the two lines under it - the first and latest
+/// prompt, which are what the hover is for. A line's worth is a summary; the whole
+/// answer is a click away in the tab.
+const HOVER_TEXT = 200;
 
 /// Not italic, and a notch larger than the rest of the hover: these two lines are what
 /// anyone reads a light's hover FOR, and body-size italics buried them under the bold
@@ -485,13 +523,19 @@ function renderSessions() {
         // place it can be read.
         const named = density.sessionNameShown(s.name) ? '' : '**' + shared.mdText(s.name) + '** - ';
         md.appendMarkdown(e + ' ' + named + '**' + label + '** - quiet ' + shared.coarse(shared.quiet(s)) + '  \n');
+        // Whether a keystroke is coming for this session, and when - or that one already
+        // went in. A prompt Chutdown is about to answer for you is the one thing on this
+        // hover you might want to get to first (answer.js).
+        const plan = answer.hoverLine(s);
+        if (plan) md.appendMarkdown(plan + '  \n');
         // The prompts and the answer are the user's and Claude's text, not ours - escaped
         // rather than pasted into markdown that the hover trusts (shared.js).
-        if (s.lastText) md.appendMarkdown('\n' + shared.mdCode(s.lastText, 'text'));
+        if (s.lastText) md.appendMarkdown('\n' + shared.mdCode(shared.flat(s.lastText, HOVER_TEXT), 'text'));
         md.appendMarkdown('\n' + promptLines(s));
         md.appendMarkdown(local ? '\n_Click to show in the editor area_  \n'
             : '\n_Click to resume it in a terminal here_  \n');
         md.appendMarkdown(copyLink(s.id) + ' · ' + renameLink(s.id) + ' · ' + transcriptLink(s) +
+            (claude.hasLocalTerminal(s.id) ? ' · ' + closeTabLink(s.id) : '') +
             (local ? '' : ' · ' + closeLinks(s.id)));
         shared.paint(item, { text: density.sessionText(e, s.name), tooltip: md });
     }

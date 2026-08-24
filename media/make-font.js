@@ -1,11 +1,19 @@
-// Builds media/chutdown.ttf - the O / F / S / H launch-button letters as a four-glyph
-// icon font, so the STATUS BAR can wear the same marks as the editor title bar.
+// Builds media/chutdown.ttf - the launch-button letters (O / F / S / H for the Claude
+// models, T / L / M for the OpenAI ones - Sol shares the S, the colour tells them apart)
+// as a seven-glyph icon font, so the STATUS BAR can wear the same marks as the editor
+// title bar.
 // A status bar item has no iconPath: its text takes plain text and $(icon) ids, so an
 // SVG cannot go there and a contributed icon font is the only way to draw the same
 // letter twice. The geometry below is copied from media/letter-*.svg (16x16 viewBox,
 // 2-wide round-capped strokes) - edit both, or the two buttons drift apart.
 // No dependencies, like make-icon.js: the strokes are outlined by hand and the
 // TrueType tables written byte by byte. Re-run with `node media/make-font.js`.
+// Then EXIT VS Code and start it again - Reload Window is not enough. The workbench
+// keeps a contributed icon font in the renderer's memory cache under its path, and a
+// reload hands the same path the same bytes: glyphs added since the window opened draw
+// as nothing (the status bar wore blank T / L / M after the OpenAI letters landed,
+// while the reused S still showed). A release never hits this - the vsix installs to a
+// new versioned dir, so the path changes - only a sync into the installed copy does.
 const fs = require('fs');
 const path = require('path');
 
@@ -18,9 +26,11 @@ const CAP = 8;           // points per round cap (half circle)
 const ARC = 48;          // points around the O
 const BEZ = 16;          // samples per cubic in the S
 
-// The letters, in slot order - O F S H, at U+E001.. in the private use area.
+// The letters, in slot order - O F S H, then T L M for the OpenAI models, at U+E001..
+// in the private use area (one contiguous run: the cmap below is a single segment).
 // Each is a list of centrelines in SVG coordinates: `line` for a straight run,
-// `curve` for a chain of cubics, `ring` for the O.
+// `curve` for a chain of cubics, `ring` for the O. Sol wears the same S as Sonnet -
+// there is no second S glyph, the status bar colours the item instead.
 const LETTERS = [
     { name: 'o', char: 0xE001, parts: [{ ring: [8, 8, 5.2] }] },
     { name: 'f', char: 0xE002, parts: [
@@ -38,6 +48,22 @@ const LETTERS = [
         { line: [[4.8, 2.8], [4.8, 13.2]] },
         { line: [[11.2, 2.8], [11.2, 13.2]] },
         { line: [[4.8, 8], [11.2, 8]] }
+    ] },
+    { name: 't', char: 0xE005, parts: [
+        { line: [[4.6, 3.2], [11.4, 3.2]] },
+        { line: [[8, 3.2], [8, 13.2]] }
+    ] },
+    { name: 'l', char: 0xE006, parts: [{ line: [[5.2, 2.8], [5.2, 13.2], [11.2, 13.2]] }] },
+    { name: 'm', char: 0xE007, parts: [{ line: [[4.4, 13.2], [4.4, 3], [8, 8.8], [11.6, 3], [11.6, 13.2]] }] },
+    // The Chutdown "C" - media/tab-claude-*.svg: an open ring, gap facing right, notched
+    // at the top for the power bar. Here because the tab MARK is a glyph now too
+    // (shared.tabMark): a tab whose model nobody knows wears this, and it has to survive
+    // a window reload like the letters do, which only a font glyph does. Angles in the
+    // SVG's y-down sense, in degrees; the stroke is the font's 2, not the SVG's 1.8.
+    { name: 'c', char: 0xE008, parts: [
+        { arc: [8, 8, 5.2, 45, 240] },
+        { arc: [8, 8, 5.2, 300, 330] },
+        { line: [[8, 1.9], [8, 6.8]] }
     ] }
 ];
 
@@ -149,6 +175,17 @@ function outline(letter) {
             contours.push(toFont(circle(cx, cy, r - HALF, ARC), false));   // the counter
         } else if (part.curve) {
             contours.push(toFont(ribbon(flattenCubics(part.curve)), true));
+        } else if (part.arc) {
+            // An open arc: centre, radius, start and end angle (degrees, increasing
+            // clockwise on screen), walked as a polyline and ribboned like the S.
+            const [cx, cy, r, a0, a1] = part.arc;
+            const steps = Math.max(4, Math.round(ARC * Math.abs(a1 - a0) / 360));
+            const pts = [];
+            for (let i = 0; i <= steps; i++) {
+                const a = (a0 + (a1 - a0) * (i / steps)) * Math.PI / 180;
+                pts.push([cx + r * Math.cos(a), cy + r * Math.sin(a)]);
+            }
+            contours.push(toFont(ribbon(pts), true));
         } else {
             const p = part.line;
             for (let i = 0; i + 1 < p.length; i++) contours.push(toFont(stadium(p[i], p[i + 1]), true));

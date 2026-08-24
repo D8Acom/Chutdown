@@ -14,7 +14,10 @@ function trackClaude(terminal, cwd, inEditor, hint) {
     const rec = { terminal, cwd, created: Date.now(), sessionId: '', lastTitle: '',
         inEditor: !!inEditor, pid: 0,
         resumeId: (hint && hint.resumeId) || '',        // `claude --resume <id>` seen on the command line
-        continueFlag: !!(hint && hint.continueFlag) };  // `claude --continue` / -c
+        continueFlag: !!(hint && hint.continueFlag),    // `claude --continue` / -c
+        // The letter the tab's mark was created with ('' = the Chutdown "C"); undefined
+        // when nobody knows what the tab wears (an adopted terminal). See refreshTabMarks.
+        letter: hint && typeof hint.letter === 'string' ? hint.letter : undefined };
     shared.claudeRecs.push(rec);
     shared.nlog('tracking claude tab in ' + cwd + (rec.resumeId ? ' (--resume ' + rec.resumeId.slice(0, 8) + ')'
         : rec.continueFlag ? ' (--continue)' : ''));
@@ -53,14 +56,55 @@ let hadTabs = new Set();      // sessions that still had a tab when state was la
 let restoredByPid = 0;        // how many tabs re-attached by pid (0 = the app restarted)
 let savedPidCount = 0;
 let lastSavedBindings = '';
+// Set by reviveClaudeTabs when the saved sessions found NO restored tab to pair with:
+// the tabs the window came back with, and how many sessions were saved. While those
+// very tabs are still the whole window, saveBindings leaves the stored list alone.
+let keepSaved = null;
+// Sessions still waiting for their tab after the settle pass (reviveClaudeTabs holds
+// them in pendingOrder): the rest of the tabs can still arrive, and each one that does
+// re-runs the pairing (restoreBinding) - until lateDeadline, RESTORE_MAX_MS from load.
+let lateDeadline = 0;
+let lateTimer = null;
+let savedSlotCount = 0;       // tabs the saved list had a slot for = how many to expect back
+let firstPassDone = false;    // the settle pass has run; later tabs are "late"
+let triedTouched = new Set(); // restored tabs a pass offered a session and found in use
 
 function saveBindings() {
     if (!shared.state.extContext) return;
+    // Nothing bound, and the list we loaded had sessions that never found their tab: a
+    // save now would replace the only record of those sessions with a row of
+    // placeholders - and that is what turned ONE missed pairing into a window that came
+    // back "empty of everything" on the next reload, and the one after. The saved
+    // list is held, untouched, for as long as the window is exactly the tabs it was
+    // restored with; a tab opened or closed, or a session bound, and saving is live
+    // again - the user has moved on, and the list should follow what is actually open.
+    if (keepSaved) {
+        const t = vscode.window.terminals;
+        const same = t.length === keepSaved.terms.size && t.every((x) => keepSaved.terms.has(x));
+        const bound = shared.claudeRecs.some((r) => r.sessionId && t.includes(r.terminal));
+        // ...or sessions are still waiting for tabs that may yet arrive (holdRest).
+        const waiting = pendingOrder.length > 0 && Date.now() < lateDeadline;
+        if (waiting || (same && !bound)) {
+            if (!keepSaved.said) {
+                keepSaved.said = true;
+                shared.nlog('bindings: keeping the saved list - ' + keepSaved.n +
+                    ' session(s) in it never found their restored tab');
+            }
+            return;
+        }
+        keepSaved = null;
+    }
     const map = {};
     for (const r of shared.claudeRecs)
         if (r.pid && r.sessionId && vscode.window.terminals.includes(r.terminal))
             map[String(r.pid)] = { sessionId: r.sessionId, cwd: r.cwd,
-                                   created: r.created, inEditor: r.inEditor };
+                                   created: r.created, inEditor: r.inEditor,
+                                   // The letter the tab's GLYPH mark wears ('' = the C) - a
+                                   // glyph survives the reload, so the restored rec can
+                                   // trust it. Named for what it is: a binding written
+                                   // while the marks were still SVGs has no `glyph`, and
+                                   // that tab comes back bare (restoreBinding).
+                                   glyph: r.letter };
     // Same records, in tab order, each carrying the title last written to its tab -
     // the only key that survives a full quit (pids do not). EVERY tab takes a slot,
     // claude or not: a restored tab is retitled by its own shell before we ever see it,
@@ -84,6 +128,16 @@ function saveBindings() {
 /// it was bound to. Reads the map captured at activation, NOT live state - the
 /// periodic saveBindings() overwrites the store before slow pids resolve.
 function restoreBinding(terminal) {
+    // A tab arriving AFTER the settle pass while sessions are still waiting for theirs
+    // (holdRest): run the pairing again once this burst of tabs has settled.
+    if (firstPassDone && pendingOrder.length && Date.now() < lateDeadline) {
+        if (lateTimer) clearTimeout(lateTimer);
+        lateTimer = setTimeout(() => {
+            lateTimer = null;
+            try { reviveClaudeTabs(); } catch (e) { shared.nlog('revive: ' + e.message); }
+        }, TAB_SETTLE_MS);
+        if (lateTimer.unref) lateTimer.unref();
+    }
     terminal.processId.then((pid) => {
         if (!pid) return;
         // Only terminals that were ALREADY THERE when this window loaded can be
@@ -107,7 +161,14 @@ function restoreBinding(terminal) {
         if (!Object.keys(pendingRestore).length) pendingDeadline = 0;
         if (shared.claudeRecs.some((r) => r.terminal === terminal || r.sessionId === b.sessionId)) return;
         shared.claudeRecs.push({ terminal, cwd: b.cwd, created: b.created, sessionId: b.sessionId,
-            lastTitle: '', inEditor: b.inEditor, pid, resumeId: '', continueFlag: false });
+            lastTitle: '', inEditor: b.inEditor, pid, resumeId: '', continueFlag: false,
+            // The letter its glyph mark wears (saveBindings) - a ThemeIcon comes back
+            // from a reload as it was. A binding written while the marks were still
+            // SVGs has no `glyph`, and that tab really IS bare now: a file-URI icon does
+            // not survive a reload (seen 2026-08-22: four lettered tabs, four "≡" after
+            // the reload), so it is recorded as wearing nothing until refreshTabMarks
+            // reopens it - once, wearing the glyph.
+            letter: typeof b.glyph === 'string' ? b.glyph : undefined });
         renameActiveClaude();
     }, () => { });
 }
@@ -119,10 +180,19 @@ function restoreBinding(terminal) {
 function loadPendingBindings() {
     const store = shared.state.extContext.workspaceState;
     pendingDeadline = Date.now() + RESTORE_MAX_MS;
+    lateDeadline = Date.now() + RESTORE_MAX_MS;
+    marksDue = Date.now() + RESTORE_MAX_MS;    // the marks pass keeps trying this long (pollTabMarks)
+    marksSaid = '';
+    marksWhy = 'window loaded';
     restoredByPid = 0;
+    keepSaved = null;
+    firstPassDone = false;
+    triedTouched = new Set();
+    if (lateTimer) { clearTimeout(lateTimer); lateTimer = null; }
     pendingRestore = Object.assign({}, store.get(BIND_KEY) || {});
     pendingOrder = (store.get(ORDER_KEY) || []).slice();
     savedPidCount = Object.keys(pendingRestore).length;
+    savedSlotCount = pendingOrder.length;
     // The record of which sessions still HAD a tab when this window last saved - the
     // one thing we know at startup about what was open and what had been closed.
     // reviveClaudeTabs() empties pendingOrder, so it is captured here, not read later.
@@ -145,6 +215,10 @@ function loadPendingBindings() {
         // clicked, because a rename can only ever land on the active tab.
         const swept = () => {
             shared.clearGate('tabs');
+            // ...and the MARKS first: a tab whose icon no longer says what its session is
+            // running is reopened wearing the right letter (born titled, so it needs no
+            // flick), before the flick stamps the tabs that stay.
+            try { refreshTabMarks('window loaded'); } catch (e) { shared.nlog('marks: ' + e.message); }
             if (shared.cfg().get('restoreTabNames'))
                 sweepTabTitles('window loaded').catch((e) => shared.nlog('rename: sweep - ' + e.message));
         };
@@ -213,43 +287,127 @@ function looksLikeClaudeTab(t, titles, dead) {
 /// aged out of the lookback window get the exact title they had at quit time.
 function reviveClaudeTabs() {
     if (!shared.cfg().get('restoreTabNames')) return;
+    firstPassDone = true;               // from here on, a late tab re-runs this (restoreBinding)
     const saved = pendingOrder;
     pendingOrder = [];
     if (!saved.length) return;
     const terms = vscode.window.terminals;
+    // Sessions that found no tab THIS pass, while the window still has fewer tabs than
+    // were saved: kept pending, to be paired with the tabs still arriving. The first
+    // pass runs when the tab set has merely gone QUIET for a while - and on a slow cold
+    // boot the panel's tabs come back seconds before the editor area's do, so it once
+    // ran with 4 of 14 tabs present, paired the 4 sessions with 4 panel shells the user
+    // had been typing in, left those alone (rightly), and was over by the time the 4
+    // claude tabs actually arrived: nothing left to pair them with. The saved list is
+    // held while this waits (saveBindings) - these sessions are not lost yet.
+    const holdRest = (left) => {
+        if (!left.length || terms.length >= savedSlotCount || Date.now() >= lateDeadline) return;
+        pendingOrder = left;
+        if (!keepSaved) keepSaved = { terms: new Set(terms), n: left.length, said: false };
+        shared.nlog('revive: ' + left.length + ' session(s) still waiting for a tab - ' +
+            terms.length + ' of ' + savedSlotCount + ' tab(s) back so far');
+    };
     const titles = new Set(saved.map((e) => e && e.title).filter(Boolean));
     const free = (e) => !!(e && e.sessionId &&
         !shared.claudeRecs.some((r) => r.sessionId === e.sessionId));
     // Every saved pid stale = the app was quit and reopened, so nothing is running in
     // these tabs; a click may safely resume the session right back into one.
     const dead = savedPidCount > 0 && restoredByPid === 0;
-    // The saved list has a slot for every tab, so when the window brought back the same
-    // number of them slot i IS tab i - and the names land on the right tabs however the
-    // shells have retitled themselves. Older state (claude tabs only) has no
-    // placeholders to line up against, so it falls back to left-to-right pairing.
-    const bySlot = saved.length === terms.length && saved.some((e) => e && !e.sessionId);
+    // Three passes, strongest evidence first, each taking only what the one before left:
+    //  1. TITLE - a restored tab still wearing exactly the title we saved for a session
+    //     is that session's tab wherever it sits (a reload keeps the titles; so does
+    //     many a restart, until the relaunched shell writes over them).
+    //  2. SLOT - the saved list has a slot for every tab, so with the same number back
+    //     slot i IS tab i, however the shells have retitled themselves... as long as
+    //     the window brought them back in the order they were saved. It does not
+    //     always: the saved order is CREATION order (claude tabs opened between
+    //     .terminals batches, a restartAll putting the batch at the end), while a
+    //     restart brings them back grouped by LOCATION - the panel's tabs first, the
+    //     editor area's after - so in a mixed window every claude slot can land on a
+    //     batch tab. That is what emptied a 12-tab window after a restart: 0 pairs,
+    //     and (before the pass below) no fallback and no log line to say so. The slots
+    //     are ONE hypothesis about the layout, taken whole or not at all: if any
+    //     session's slot holds something that is not a claude tab, the order changed,
+    //     and a slot that does hold one is a coincidence, not a match.
+    //  3. ORDER - whatever is still free pairs left to right with whatever still looks
+    //     like a claude tab, the way claude-only state (no placeholders) always has.
+    // A tab a previous pass offered and found in use is not offered again: a late pass
+    // would only burn another session on it (see triedTouched).
+    const loose = new Set(terms.filter((t) => !triedTouched.has(t) && looksLikeClaudeTab(t, titles, dead)));
+    const entries = saved.filter(free);
+    const wanted = entries.length;
+    const bySlot = saved.length === terms.length && saved.some((e) => e && !e.sessionId) &&
+        saved.every((e, i) => !free(e) || loose.has(terms[i]));
+    const how = { title: 0, slot: 0, order: 0 };
     let pairs = [];
-    if (bySlot)
-        pairs = saved.map((e, i) => ({ e, t: terms[i] }))
-            .filter((p) => free(p.e) && looksLikeClaudeTab(p.t, titles, dead));
-    else {
-        const entries = saved.filter(free);
-        const loose = terms.filter((t) => looksLikeClaudeTab(t, titles, dead));
-        for (let i = 0; i < Math.min(entries.length, loose.length); i++)
-            pairs.push({ e: entries[i], t: loose[i] });
+    const take = (e, t, way) => {
+        pairs.push({ e, t });
+        loose.delete(t);
+        entries.splice(entries.indexOf(e), 1);
+        how[way]++;
+    };
+    for (const e of entries.slice()) {
+        if (!e.title) continue;
+        const worn = [...loose].filter((t) => t.name === e.title);
+        if (worn.length === 1) take(e, worn[0], 'title');   // two wearing it = no evidence
     }
+    if (bySlot)
+        saved.forEach((e, i) => {
+            if (entries.includes(e) && loose.has(terms[i])) take(e, terms[i], 'slot');
+        });
+    const rest = [...loose];                      // a Set keeps terms' order
+    for (let i = 0, n = Math.min(entries.length, rest.length); i < n; i++)
+        take(entries[0], rest[i], 'order');
+    if (!pairs.length) {
+        // Said out loud, and the saved list is KEPT (see saveBindings): nothing here
+        // matched, but the sessions were real and the next start may do better.
+        if (wanted) {
+            keepSaved = { terms: new Set(terms), n: wanted, said: false };
+            shared.nlog('revive: ' + wanted + ' saved session(s) but none of the ' + terms.length +
+                ' restored tab(s) matched' + (loose.size ? '' : ' - no tab looks like a claude tab') +
+                ': ' + terms.map((t) => '"' + t.name + '"').join(', '));
+            holdRest(entries);
+        }
+        return;
+    }
+    const by = ['title', 'slot', 'order'].filter((k) => how[k])
+        .map((k) => how[k] + ' by ' + k).join(', ');
     // A cold boot loads the extension late, and a person left at an empty prompt does
     // not wait for it: a restored tab the user has already typed into, or run something
     // in, is THEIR tab now - not paired, not renamed, never closed or typed into. Their
     // own `claude --resume` in it is adopted by adoptClaude like any hand-started claude.
     let busy = 0;
+    const dropped = [];
     if (dead) {
         const n = pairs.length;
-        pairs = pairs.filter((p) => !userTouched(p.t));
+        pairs = pairs.filter((p) => {
+            if (!userTouched(p.t, true)) return true;
+            dropped.push(p.e);
+            triedTouched.add(p.t);      // not offered to a later pass again
+            return false;
+        });
         busy = n - pairs.length;
         if (busy) shared.nlog('revive: ' + busy + ' restored tab(s) already in use - left alone');
     }
-    if (!pairs.length) return;
+    // Still waiting, if tabs are still arriving: the sessions nothing matched first, and
+    // behind them the ones whose match was a tab in use - that tab may well have been
+    // someone else's shell, with the real one not back yet (see holdRest); but if it WAS
+    // the session's own tab, typed into, the sessions with no match at all come first
+    // for whatever arrives.
+    holdRest(entries.concat(dropped));
+    if (!pairs.length) {
+        // Every pair dropped as in-use: NOTHING is bound, so the saved list is still the
+        // only record of these sessions and must not be overwritten with a row of
+        // placeholders by the next tick's saveBindings. holdRest cannot hold it here -
+        // it only holds while tabs may still be arriving, and this case has every tab
+        // back already (9 saved slots, 9 tabs, 9 dropped: 2026-08-23, and the window
+        // came back empty of everything on the reload after it, and the one after).
+        if (wanted) {
+            keepSaved = { terms: new Set(terms), n: wanted, said: false };
+            shared.nlog('revive: nothing bound - keeping the saved list of ' + wanted + ' session(s)');
+        }
+        return;
+    }
     // After a restart the tabs are empty shells: put the sessions straight back
     // (autoResume, on by default) rather than leaving each one a light-click away - and
     // not INTO those shells but into fresh terminals of our own in their place; see
@@ -275,8 +433,8 @@ function reviveClaudeTabs() {
         if (reopen) inPlace.push(rec);      // could not be reopened: resume in place instead
     }
     const resumed = reopened + (inPlace.length ? autoResumeRevived(inPlace) : 0);
-    shared.nlog('revive: re-bound ' + revived.length + ' claude tab(s) by ' +
-        (bySlot ? 'tab slot' : 'order') + (dead ? ' after a restart' : '') +
+    shared.nlog('revive: re-bound ' + revived.length + ' claude tab(s) (' + by + ')' +
+        (dead ? ' after a restart' : '') +
         (resumed ? ' - resumed ' + resumed + ' of them' +
             (reopened ? ' (' + reopened + ' in fresh terminals)' : '') : ''));
     // A reopened tab was born wearing its title; only the ones left in place need the flick.
@@ -303,13 +461,37 @@ function reviveClaudeTabs() {
 /// opened - the caller then resumes into the restored shell the old way.
 /// Has the user already got to this restored tab - typed into it, or run something in
 /// it - before the revive reached it? `state.isInteractedWith` is the workbench's own
-/// "the user has typed here" flag (our sendText does not set it, and it is false for
-/// every tab a window restores); the set is belt and braces for a shell whose
+/// "input went to this terminal" flag - false for every tab a window restores, set by
+/// the first byte xterm writes to the process: a keystroke, but also a sendText (so it
+/// is read BEFORE anything is typed into the tab) and a focus-in report from a program
+/// that asked for focus tracking, which is why it says nothing useful about a tab that
+/// is running claude (refreshTabMarks). The set is belt and braces for a shell whose
 /// integration reported a command starting, which is the same fact by another route.
+///
+/// It was read as meaning what it says for a restored shell after a quit - a bare shell,
+/// nothing running, nothing to track focus - and that was wrong, expensively. The
+/// workbench sets the flag from `onAnyInstanceDataInput`, and xterm counts as INPUT the
+/// replies it sends back on the terminal's own behalf: the device-attributes, cursor
+/// position and focus-in reports the buffer VS Code replays into a revived tab asks for.
+/// The scrollback a claude tab comes back with turns focus reporting on again, so the tab
+/// answers its own replayed history within seconds of the restore and reads as
+/// typed-into with nobody at the keyboard - the same fact refreshTabMarks learned the
+/// hard way on 2026-08-22, one restore earlier in the same startup.
+/// Seen 2026-08-23: nine restored tabs, all nine "already in use" in the same second,
+/// while identify.sweepNow had just reported no live claude process anywhere - and the
+/// revive that stood aside for them cost the window every binding it had (reviveClaudeTabs).
+///
+/// So `restoring` - the pass that runs while the window is coming back, where the replay
+/// is happening and the flag is noise - asks only whether a command actually RAN in the
+/// tab, which no replay can fake. Everywhere else the flag is still read, but only for
+/// the terminal that has FOCUS: a person can only be typing a draft into the tab they
+/// are looking at, while the replayed queries flag every tab at once.
 const touchedTerms = new WeakSet();
-function userTouched(t) {
-    try { if (t.state && t.state.isInteractedWith) return true; } catch { /* no state */ }
-    return touchedTerms.has(t);
+function userTouched(t, restoring) {
+    if (touchedTerms.has(t)) return true;
+    if (restoring) return false;
+    if (t !== vscode.window.activeTerminal) return false;
+    try { return !!(t.state && t.state.isInteractedWith); } catch { return false; }
 }
 
 /// The shell the user has told VS Code to open terminals in, read from THEIR settings
@@ -367,15 +549,18 @@ function reopenRevivedTab(e, t, sh) {
     if (!safeId(e.sessionId)) return null;
     const s = shared.sessions.get(e.sessionId);
     const name = s && s.name ? lights.lightFor(s).e + ' ' + s.name : (e.title || 'claude');
-    const cwd = e.cwd || shared.firstRoot();
+    // The session's launch folder first (see resumeSession) - the saved tab cwd may
+    // itself be a resume opened where the session's Bash tool had wandered.
+    const cwd = (s && s.home) || e.cwd || shared.firstRoot();
     const inEditor = !!e.inEditor;
     const wasActive = vscode.window.activeTerminal === t;
+    const letter = modelLetter(s && s.model);
     let terminal;
     try {
         const opts = {
             name,
             cwd,
-            iconPath: shared.claudeIcon(modelLetter(s && s.model)),
+            ...shared.tabMark(letter),
             location: inEditor ? { viewColumn: activeViewColumn() } : { parentTerminal: t },
             env: Object.assign({}, sh && sh.env, { CLAUDE_CODE_DISABLE_TERMINAL_TITLE: '1' })
         };
@@ -390,7 +575,7 @@ function reopenRevivedTab(e, t, sh) {
     }
     try { t.dispose(); } catch { /* already gone */ }
     const rec = { terminal, cwd, created: e.created, sessionId: e.sessionId, lastTitle: name,
-        inEditor, pid: 0, resumeId: e.sessionId, continueFlag: false, revived: false };
+        inEditor, pid: 0, resumeId: e.sessionId, continueFlag: false, revived: false, letter };
     shared.claudeRecs.push(rec);
     terminal.processId.then((pid) => { rec.pid = pid || 0; saveBindings(); }, () => { });
     // The tab the window came back looking at stays the one in front - its replacement,
@@ -431,6 +616,143 @@ function autoResumeRevived(recs) {
         catch (e) { shared.nlog('resume: ' + id.slice(0, 8) + ' - ' + e.message); }
     }
     return n;
+}
+
+/// Every bound claude tab whose MARK no longer says what its session is running,
+/// reopened wearing the right letter. VS Code freezes a terminal's icon at creation and
+/// offers no way to change it afterwards (shared.tabMark), so a tab launched as a
+/// plain `claude` - the "C" - kept the "C" for ever, however long the transcript had
+/// been naming the model that answers in it, and a tab whose session moved on with
+/// `/model` kept the letter it was launched with. And a window RELOAD takes the letter
+/// off every tab: the file-URI icon a terminal was created with does not come back with
+/// the reconnected process - the tab comes up wearing the workbench's default mark
+/// (seen 2026-08-22: four lettered tabs, four "≡" after the reload) - and the pid
+/// re-bind (restoreBinding) could not put it back, while after a full quit every tab is
+/// reopened from scratch (reopenRevivedTab) and so DOES come back wearing the letter the
+/// transcript names. This closes both gaps, on the two occasions the user has asked for
+/// the tabs to be brought up to date - the window loading, and the "Refresh tab names"
+/// command: the same reopen as after a quit (a fresh terminal of ours in the tab's
+/// place, born wearing the title and the letter, `claude --resume <id>` typed into it),
+/// for a tab whose letter is WRONG or MISSING (`rec.letter`: what the mark was created
+/// with; undefined for a reload-survivor, whose mark the reload dropped, and for an
+/// adopted terminal nobody made).
+///
+/// A reopen kills the claude in that tab and resumes the session into a new one, so it
+/// is done only where that costs nothing that can be seen: the session must be idle at
+/// its prompt (🔴 - not mid-turn, not waiting on a permission or a question, not
+/// processing in the background), its own status file - when it has a fresh one - must
+/// say idle too, and its transcript must have been quiet for MARK_QUIET_MS: the tail
+/// between two records of one turn can read as a finished turn, and the detf window's
+/// first pass (2026-08-22 04:21) reopened "shares" eight seconds after it had been
+/// processing - mid-turn, which a resume cannot put back. Twenty seconds costs nothing:
+/// the poll keeps trying for a minute after load, and a finished turn writes once
+/// (turn_duration) and then falls silent. What the prompt box is SHOWING cannot be read from
+/// here - the process survived the reload and its screen is its own - and the one flag
+/// the API offers, `state.isInteractedWith` (userTouched), is no stand-in for "a draft
+/// is typed here": it is set by ANY byte xterm sends the process, and claude turns focus
+/// reporting on (DECSET 1004), so the tab the window comes back looking at reports its
+/// focus-in (`ESC [ I`) the moment it is restored and is "interacted with" before
+/// anyone has touched a key. With that guard the active tab - the one the user is
+/// actually looking at, and the one they most want right - was the one left wearing the
+/// wrong letter every time, while a history suggestion sitting in its prompt (ghost
+/// text, Tab to take) was never at risk: it comes back with the resume. So it is not
+/// consulted here; a draft typed and not sent is resumed fresh, which the manual says.
+///
+/// The window-loaded pass is not one shot: the first run is the moment the restored tabs
+/// have settled, but a tab's pid can resolve after that, the scan may not have read its
+/// session yet (the first scan and the settle race), and a session mid-turn at load is
+/// idle a poll later - so the poll runs it again (pollTabMarks) for RESTORE_MAX_MS after
+/// load. The 2026-08-22 reload that "did nothing" logged no marks line at all: every tab
+/// fell through one of the silent early-outs below, which is why each pass now says what
+/// it saw - once per distinct picture, not every five seconds. Returns how many tabs
+/// were reopened.
+let marksDue = 0;       // until when pollTabMarks keeps running the window-loaded pass
+let marksSaid = '';     // the last picture logged, so a quiet poll says nothing new
+const MARK_QUIET_MS = 20_000;   // no transcript write for this long before a tab is reopened
+// Reopens per pass. Each reopen opens the new tab BEFORE the old one is torn down (a
+// panel tab is split off it), so a burst holds two consoles per tab for a moment - and
+// Git Bash (MSYS) allows 32 consoles in all: the detf window's first pass reopened
+// eleven tabs at once, on top of the .terminals servers, and a new tab's shell died
+// with "console device allocation failure - too many consoles in use, max consoles is
+// 32" (2026-08-22). Two per pass, five seconds apart, keeps the count flat; the poll
+// carries the rest (pollTabMarks - armTabMarks keeps it going for the command too).
+const MARKS_PER_PASS = 2;
+function refreshTabMarks(why) {
+    let sh = null, read = false, n = 0, held = 0;
+    const skipped = [];
+    const seen = { right: 0, unbound: 0, unscanned: 0, unknown: 0 };
+    for (const rec of shared.claudeRecs.slice()) {
+        if (!vscode.window.terminals.includes(rec.terminal)) continue;
+        if (!rec.sessionId || rec.revived) { seen.unbound++; continue; }
+        const s = shared.sessions.get(rec.sessionId);
+        if (!s) { seen.unscanned++; continue; }
+        const letter = modelLetter(s.model);
+        if (!letter) { seen.unknown++; continue; }            // nothing known to fix
+        if (letter === rec.letter) { seen.right++; continue; }   // already right
+        const who = (s.name || rec.sessionId.slice(0, 8)) + ' (' +
+            (rec.letter === undefined ? '?' : rec.letter ? rec.letter.toUpperCase() : 'C') +
+            ' -> ' + letter.toUpperCase() + ')';
+        const idle = s.state === 'awaiting' && !s.background && !s.waiting && !s.question;
+        if (!idle) { skipped.push(who + ' - ' + lights.lightFor(s).label); continue; }
+        // ...by the CLI's own account too, and quiet long enough to be believed.
+        if (s.cliStatus && s.cliStatus !== 'idle') {
+            skipped.push(who + ' - the CLI says "' + s.cliStatus + '"'); continue;
+        }
+        const quiet = Date.now() - (s.lastWriteMs || 0);
+        if (quiet < MARK_QUIET_MS) {
+            skipped.push(who + ' - wrote ' + Math.round(quiet / 1000) + 's ago, waiting for it to settle'); continue;
+        }
+        if (!safeId(rec.sessionId)) continue;
+        if (n >= MARKS_PER_PASS) { held++; continue; }   // the next pass takes it
+        if (!read) { read = true; sh = preferredShell(); }
+        // Out of the list BEFORE the old tab is disposed: claudeTabClosed would otherwise
+        // read the close as the user shutting the session and retire its light.
+        const i = shared.claudeRecs.indexOf(rec);
+        if (i >= 0) shared.claudeRecs.splice(i, 1);
+        const fresh = reopenRevivedTab({ sessionId: rec.sessionId, cwd: rec.cwd, created: rec.created,
+            inEditor: rec.inEditor, title: rec.lastTitle }, rec.terminal, sh);
+        if (!fresh) { shared.claudeRecs.splice(Math.min(i, shared.claudeRecs.length), 0, rec); continue; }
+        shared.nlog('marks: ' + why + ' - reopened ' + who + ' wearing its letter');
+        n++;
+    }
+    // What the pass saw, said once per distinct picture: the poll re-runs the
+    // window-loaded pass every five seconds for a minute, and a quiet one says nothing.
+    const parts = [];
+    if (seen.right) parts.push(seen.right + ' wearing the right letter');
+    if (seen.unbound) parts.push(seen.unbound + ' not bound to a session yet');
+    if (seen.unscanned) parts.push(seen.unscanned + ' whose session the scan has not read');
+    if (seen.unknown) parts.push(seen.unknown + ' whose model is not known');
+    if (skipped.length) parts.push(skipped.length + ' left wearing the wrong letter: ' + skipped.join('; '));
+    if (held) parts.push(held + ' more next pass');
+    const picture = why + '|' + parts.join('|');
+    if (n || (parts.length && picture !== marksSaid)) {
+        marksSaid = picture;
+        const total = seen.right + seen.unbound + seen.unscanned + seen.unknown + skipped.length + n + held;
+        shared.nlog('marks: ' + why + ' - ' + total + ' claude tab(s)' +
+            (n ? ', ' + n + ' reopened' : '') + (parts.length ? ': ' + parts.join(', ') : ''));
+    }
+    if (n) saveBindings();
+    return n;
+}
+
+/// The window-loaded pass again, from the poll (shutdown.tick), for RESTORE_MAX_MS after
+/// load - see refreshTabMarks. Nothing to do, nothing said.
+function pollTabMarks() {
+    if (!marksDue) return 0;
+    if (Date.now() > marksDue) { marksDue = 0; return 0; }
+    return refreshTabMarks(marksWhy);
+}
+let marksWhy = 'window loaded';   // what the poll's passes are labelled
+
+/// Start (or restart) the paced passes - loadPendingBindings at window load, and the
+/// "Refresh tab names" command: one pass now, then the poll every five seconds for
+/// RESTORE_MAX_MS, MARKS_PER_PASS reopens each, until every tab is right or the time
+/// is up. Returns what the first pass reopened.
+function armTabMarks(why) {
+    marksDue = Date.now() + RESTORE_MAX_MS;
+    marksSaid = '';
+    marksWhy = why;
+    return refreshTabMarks(why);
 }
 
 /// Only the ACTIVE terminal can be renamed, so each tab in the list is revealed in turn
@@ -574,8 +896,10 @@ function settleIntoGroup(targetCol, tries) {
 }
 
 /// The launch buttons: ONE status bar entry per claudeButtons entry ("opus", "fable",
-/// "sonnet", "haiku"), each opening a claude terminal pinned to that model. Entries
-/// are "label = model" (or just "model"); edits to the setting rebuild the buttons live.
+/// "sonnet", "haiku" - and "sol", "terra", "luna", "mini" for Codex), each opening a
+/// terminal pinned to that model: `claude --model` for a Claude model, `codex -m` for
+/// an OpenAI one. Entries are "label = model" (or just "model"); edits to the setting
+/// rebuild the buttons live.
 const claudeButtons = [];
 const claudeButtonEntries = [];   // {label, model} behind each item, same order
 
@@ -598,32 +922,76 @@ function paintClaudeButtons() {
 function buttonLabels() { return claudeButtonEntries.map((b) => b.label); }
 
 /// The models the "Choose Models" picker offers, in BUTTON ORDER - which is also the
-/// order of the editor title letter icons (O / F / S / H). `best` is what the hover
-/// says the model is for: choosing between four buttons is guesswork without it.
+/// order of the editor title letter icons: the four Claude models (O / F / S / H, in
+/// orange) and then the four OpenAI models Codex's own /model picker leads with
+/// (S / T / L / M, in blue). `best` is what the hover says the model is for: choosing
+/// between eight buttons is guesswork without it. `vendor` is which CLI a button types
+/// into its terminal - `claude --model` or `codex -m` - and which colour its letter
+/// wears: Sol and Sonnet share the S, and the colour is the only thing that tells the
+/// two marks apart on a crowded bar, so the letters carry one everywhere they appear.
+/// `letter` is the static resource the mark draws from (media/letter-*.svg for the
+/// editor title bar and the tab, a glyph in media/chutdown.ttf for the status bar).
 /// How many of the catalog's models have an editor title icon - the number of
 /// newClaudeSlotN commands and editor/title entries in package.json, each with its own
-/// letter resource. A fifth catalog model would need a fifth of all three.
-const TITLE_SLOTS = 4;
-
+/// letter resource. A ninth catalog model would need a ninth of all three.
 const MODEL_CATALOG = [
-    { label: 'opus', model: 'claude-opus-5', name: 'Claude Opus 5',
+    { label: 'opus', model: 'claude-opus-5', name: 'Claude Opus 5', vendor: 'claude', letter: 'o',
       best: 'The everyday workhorse. Complex agentic coding, multi-file features, larger refactors, long autonomous runs. Start here.' },
-    { label: 'fable', model: 'claude-fable-5', name: 'Claude Fable 5',
+    { label: 'fable', model: 'claude-fable-5', name: 'Claude Fable 5', vendor: 'claude', letter: 'f',
       best: 'The most capable model, and the most expensive. Keep it for the hardest reasoning and the longest-horizon work - the tasks Opus does not finish.' },
-    { label: 'sonnet', model: 'claude-sonnet-5', name: 'Claude Sonnet 5',
+    { label: 'sonnet', model: 'claude-sonnet-5', name: 'Claude Sonnet 5', vendor: 'claude', letter: 's',
       best: 'Near-Opus quality on coding and agentic work at a fraction of the cost. The cost-conscious pick for ordinary tasks.' },
-    { label: 'haiku', model: 'claude-haiku-4-5', name: 'Claude Haiku 4.5',
-      best: 'Fastest and cheapest. Easy, well-scoped jobs: quick edits, renames, lookups, summaries, boilerplate.' }
+    { label: 'haiku', model: 'claude-haiku-4-5', name: 'Claude Haiku 4.5', vendor: 'claude', letter: 'h',
+      best: 'Fastest and cheapest. Easy, well-scoped jobs: quick edits, renames, lookups, summaries, boilerplate.' },
+    { label: 'sol', model: 'gpt-5.6-sol', name: 'GPT-5.6 Sol', vendor: 'openai', letter: 's',
+      best: 'OpenAI\'s frontier model, and Codex\'s default: complex coding, research and long real-world tasks. The Opus of the blue side - and the other S.' },
+    { label: 'terra', model: 'gpt-5.6-terra', name: 'GPT-5.6 Terra', vendor: 'openai', letter: 't',
+      best: 'Balanced quality, latency and cost. The everyday agentic coding pick when Sol is more than the job needs.' },
+    { label: 'luna', model: 'gpt-5.6-luna', name: 'GPT-5.6 Luna', vendor: 'openai', letter: 'l',
+      best: 'Fast and affordable agentic coding. High-throughput, lower-latency work.' },
+    { label: 'mini', model: 'gpt-5.4-mini', name: 'GPT-5.4 mini', vendor: 'openai', letter: 'm',
+      best: 'Small, fast and cost-efficient. Simple, well-scoped coding tasks - the Haiku of the blue side.' }
 ];
+const TITLE_SLOTS = MODEL_CATALOG.length;
 
 /// What a model is good for, for the hover. Exact id first, then a family match, so a
-/// pinned snapshot ("claude-haiku-4-5-20251001") still finds its blurb.
+/// pinned snapshot ("claude-haiku-4-5-20251001") still finds its blurb - and an Azure
+/// deployment named for its model ("gpt-5-mini", "gpt-5.1-codex-mini") its letter.
 function modelInfo(model) {
     const id = String(model || '').trim();
     if (!id) return null;
     return MODEL_CATALOG.find((m) => m.model === id) ||
         MODEL_CATALOG.find((m) => id.startsWith(m.model)) ||
         MODEL_CATALOG.find((m) => id.includes(m.label)) || null;
+}
+
+/// Which CLI a model belongs to - 'claude' or 'openai' (Codex). The catalog says for
+/// its own; a hand-typed id is read off its name, since an OpenAI id never starts with
+/// "claude-" and a Claude one never with "gpt-", "o3"/"o4" or "codex". Unknown = claude:
+/// that is what every button launched before there was a second CLI, and a wrong guess
+/// there costs a claude that says "no such model", not a codex typed at claude.
+const OPENAI_ID = /^(?:gpt-|o\d|codex|chatgpt)/i;
+function modelVendor(model) {
+    const info = modelInfo(model);
+    if (info) return info.vendor;
+    return OPENAI_ID.test(String(model || '').trim()) ? 'openai' : 'claude';
+}
+
+/// The colour a vendor's letters wear in the STATUS BAR - a status bar item has one
+/// colour for all its text (the letter and the word), so the whole button takes it. The
+/// SVGs the editor title bar and the tabs use carry their own (media/letter-*.svg: the
+/// orange and blue pair per theme). Light enough to read on either of the two status
+/// bars VS Code ships - the blue one and the dark one.
+const VENDOR_COLOR = { claude: '#EFA07A', openai: '#8FC6FF' };
+function vendorColor(model) { return VENDOR_COLOR[modelVendor(model)]; }
+
+/// The tab mark for a codex terminal: its model's blue letter, or - for a model with
+/// no letter - a plain sparkle in the same blue, never the Chutdown "C", which says "a
+/// claude tab we manage", and this is neither. Spread into createTerminal's options.
+function codexMark(model) {
+    const l = modelLetter(model);
+    return l ? shared.tabMark(l, 'openai')
+             : { iconPath: new vscode.ThemeIcon('sparkle'), color: new vscode.ThemeColor('terminal.ansiBlue') };
 }
 
 function parseClaudeButtons() {
@@ -683,16 +1051,23 @@ function buildClaudeButtons() {
         prio -= 0.01;
         item.command = { command: 'chutdown.newClaude', arguments: [b.model], title: 'New' };
         item.text = buttonText(b);
+        item.color = vendorColor(b.model);     // orange = claude, blue = codex
         item.tooltip = buttonHover(b);
         item.show();
         claudeButtons.push(item);
         claudeButtonEntries.push(b);
     }
     // The same buttons also sit top-right in the editor title bar as letter icons
-    // (package.json editor/title menu, slots 1-4: O/F/S/H, negative navigation order so
-    // they sit leftmost in that row). One context key per slot, each showing that slot
-    // only when its model is among the buttons - and none of them when editorTitleButtons
-    // is off.
+    // (package.json editor/title menu, slots 1-4: O/F/S/H in orange, 5-8: S/T/L/M in
+    // blue, negative navigation order so they sit leftmost in that row). One context key
+    // per slot, each showing that slot only when its model is among the buttons - and
+    // none of them when editorTitleButtons is off.
+    // VS Code draws at most SEVEN of them: the editor-title toolbar is built with
+    // overflowBehavior {maxItems: 9}, its own split-editor button is exempt from hiding
+    // but still counted, and the hide test is `count >= max - exempt` - so the 8th
+    // extension icon (the blue M, with all eight ticked) is filed under the row's "..."
+    // menu, where its command title is the label. Nothing to do about it from here; the
+    // status bar has no such cap, and the setting's description says so.
     const titleIcons = shared.cfg().get('editorTitleButtons');
     const slots = slotEntries(entries);
     for (let i = 0; i < TITLE_SLOTS; i++)
@@ -720,8 +1095,14 @@ function buttonHover(b) {
     // open a terminal that errors?" has its answer before the click.
     const why = b.model ? usage.modelAvailability(b.label).why : '';
     if (why) md.appendMarkdown('\n$(warning) ' + why + '  \n');
-    md.appendMarkdown('\n_Click to open a Claude terminal on it_ - the tab auto-renames to your ' +
-        'first prompt, with a traffic light in the title  \n');
+    if (modelVendor(b.model) === 'openai')
+        // Said plainly: the lights, the renaming and the armed shutdown all read Claude
+        // Code's own files, and a codex tab writes none of them.
+        md.appendMarkdown('\n_Click to open a Codex terminal on it_ (`codex -m`) - blue letter, ' +
+            'no traffic light and no auto-rename: those read Claude Code\'s session files  \n');
+    else
+        md.appendMarkdown('\n_Click to open a Claude terminal on it_ - the tab auto-renames to your ' +
+            'first prompt, with a traffic light in the title  \n');
     md.appendMarkdown('\n[$(list-selection) Choose models](command:chutdown.pickModels)');
     return md;
 }
@@ -738,26 +1119,43 @@ async function pickModels() {
     // Hand-typed entries outside the catalog stay offered, and stay ticked: a picker
     // that silently dropped a custom model would be a trap, not a convenience.
     const extra = current.filter((b) => b.model && !MODEL_CATALOG.some((m) => m.model === b.model));
-    const items = MODEL_CATALOG.map((m) => {
+    // Two groups under two headings - the Claude models (orange letters, `claude --model`)
+    // and the OpenAI ones (blue letters, `codex -m`) - so the second S in the list is
+    // never mistaken for the first. A separator row cannot be ticked; it carries no
+    // `entry`, which is how it is told apart below.
+    const VENDOR_HEAD = { claude: 'Claude Code - orange letters, claude --model',
+        openai: 'OpenAI Codex - blue letters, codex -m' };
+    const items = [];
+    let lastVendor = '';
+    for (const m of MODEL_CATALOG) {
+        if (m.vendor !== lastVendor) {
+            items.push({ label: VENDOR_HEAD[m.vendor] || m.vendor, kind: vscode.QuickPickItemKind.Separator });
+            lastVendor = m.vendor;
+        }
         // Labelled, never hidden: this is a reading of the account's plan and reported
         // limits, and a picker that silently dropped a model would leave anyone it read
         // wrong with no way back to it. Tick it and the button is yours.
         const av = usage.modelAvailability(m.label);
-        return {
-            label: m.label + (av.available ? '' : '  $(warning)'),
+        items.push({
+            label: '$(chutdown-letter-' + m.letter + ') ' + m.label + (av.available ? '' : '  $(warning)'),
             description: m.model,
             detail: (av.why ? av.why + ' ' : '') + m.best,
             entry: m.label + ' = ' + m.model, picked: picked.has(m.model)
-        };
-    }).concat(extra.map((b) => ({
-        label: b.label, description: b.model, detail: 'Custom entry from your settings',
-        entry: b.label + ' = ' + b.model, picked: true
-    })));
+        });
+    }
+    if (extra.length) items.push({ label: 'From your settings', kind: vscode.QuickPickItemKind.Separator });
+    for (const b of extra)
+        items.push({
+            label: b.label, description: b.model,
+            detail: 'Custom entry from your settings' +
+                (modelVendor(b.model) === 'openai' ? ' - launched with codex -m' : ''),
+            entry: b.label + ' = ' + b.model, picked: true
+        });
 
     const chosen = await vscode.window.showQuickPick(items, {
         canPickMany: true,
-        title: 'Chutdown: Claude launch buttons',
-        placeHolder: 'Pick the models that get a button (each also gets its letter icon in the editor title bar)'
+        title: 'Chutdown: launch buttons',
+        placeHolder: 'Pick the models that get a button (each also gets its letter icon in the editor title bar - VS Code draws seven there at most; an eighth sits under that row\'s ... menu)'
     });
     if (!chosen) return;                       // escaped - leave the setting alone
     if (!chosen.length) {
@@ -771,7 +1169,7 @@ async function pickModels() {
     const target = inspect.workspaceFolderValue !== undefined ? vscode.ConfigurationTarget.WorkspaceFolder
         : inspect.workspaceValue !== undefined ? vscode.ConfigurationTarget.Workspace
         : vscode.ConfigurationTarget.Global;
-    await shared.cfg().update('claudeButtons', chosen.map((c) => c.entry), target);
+    await shared.cfg().update('claudeButtons', chosen.map((c) => c.entry).filter(Boolean), target);
     // onDidChangeConfiguration rebuilds the buttons - nothing to do here.
 }
 
@@ -791,21 +1189,22 @@ function slotEntries(entries) {
 }
 
 /// The letter a model's TAB wears, from the same static resources the editor title
-/// bar uses - so slot order is the only place the letters are decided, once. A model
-/// outside the catalog (a hand-typed id) has no letter and keeps the Chutdown "C".
-const SLOT_LETTERS = ['o', 'f', 's', 'h'];   // one per catalog position, TITLE_SLOTS long
+/// bar uses - so the catalog is the only place the letters are decided, once. A model
+/// outside the catalog (a hand-typed id) has no letter and keeps the Chutdown "C" (or,
+/// launched with codex, a sparkle - see codexMark). The letter alone does not name the
+/// model: Sonnet and Sol are both 's', and the vendor (modelVendor) picks the colour.
 function modelLetter(model) {
     const info = modelInfo(model);
-    const i = info ? MODEL_CATALOG.indexOf(info) : -1;
-    return i >= 0 && i < TITLE_SLOTS ? SLOT_LETTERS[i] : '';
+    return info ? info.letter : '';
 }
 
 /// The same letter again, for the two places that take a $(icon) id instead of an SVG:
 /// the status bar button and its hover. A status bar item has no iconPath - its text is
 /// plain text and icon ids - so the mark the editor title bar draws from
 /// media/letter-*.svg is shipped a second time as glyphs in media/chutdown.ttf
-/// (package.json `contributes.icons`, built by media/make-font.js). A hand-typed model
-/// has no letter and keeps the generic sparkle.
+/// (package.json `contributes.icons`, built by media/make-font.js). One glyph per
+/// letter, not per model - the two S buttons share it and differ by item colour. A
+/// hand-typed model has no letter and keeps the generic sparkle.
 function letterIcon(model) {
     const l = modelLetter(model);
     return l ? '$(chutdown-letter-' + l + ')' : '$(sparkle)';
@@ -818,20 +1217,39 @@ function newClaudeSlot(i) {
 }
 
 /// The launch buttons: a terminal we created, so its tab is ours to rename later.
+/// An OpenAI model opens a CODEX terminal instead (`codex -m <model>`), wearing its
+/// blue letter - and is NOT tracked: the lights, the renaming, the bindings and the
+/// armed shutdown all read Claude Code's own files (transcripts, pid files, the status
+/// file), which a codex tab never writes, so tracking it would only hand the binder a
+/// tab with no session to pair it with - and a claude session in the same folder to
+/// pair it with by mistake. It is a plain terminal that happens to wear a letter.
 function newClaude(model) {
     const cwd = shared.firstRoot();
     const inEditor = shared.cfg().get('openInEditorArea');
     const targetCol = activeViewColumn();
+    if (modelVendor(model) === 'openai') {
+        const terminal = vscode.window.createTerminal({
+            name: 'codex',
+            cwd,
+            ...codexMark(model),                      // blue S / T / L / M, or a sparkle
+            location: claudeLocation()
+        });
+        terminal.show();
+        terminal.sendText('codex' + (model ? ' -m ' + model : ''), true);
+        shared.nlog('opened a codex tab in ' + cwd + (model ? ' on ' + model : '') + ' (not tracked)');
+        if (inEditor) settleIntoGroup(targetCol);
+        return;
+    }
     const terminal = vscode.window.createTerminal({
         name: 'claude',
         cwd,
-        iconPath: shared.claudeIcon(modelLetter(model)),   // O / F / S / H, or the "C"
+        ...shared.tabMark(modelLetter(model)),   // O / F / S / H, or the "C"
         location: claudeLocation(),
         env: { CLAUDE_CODE_DISABLE_TERMINAL_TITLE: '1' }
     });
     terminal.show();
     terminal.sendText('claude' + (model ? ' --model ' + model : ''), true);
-    trackClaude(terminal, cwd, inEditor);
+    trackClaude(terminal, cwd, inEditor, { letter: modelLetter(model) });
     if (inEditor) settleIntoGroup(targetCol);
 }
 
@@ -886,7 +1304,12 @@ function reviveCommand(rec, id, cwd) {
 
 function resumeSession(s) {
     if (!safeId(s.id)) return;
-    const cwd = s.cwd || shared.firstRoot();
+    // The folder the session was LAUNCHED in (scan.js: s.home, the first record's
+    // cwd), not s.cwd - that is the newest record's, and it follows the session's own
+    // Bash tool around. Resuming where the tool last cd'd put "D8A" on the tab (VS
+    // Code's ${cwdFolder} description, shown when a terminal's cwd is not the
+    // workspace root) and filed the session's work under a project it never belonged to.
+    const cwd = s.home || s.cwd || shared.firstRoot();
     const inEditor = shared.cfg().get('openInEditorArea');
     const targetCol = activeViewColumn();
     const terminal = vscode.window.createTerminal({
@@ -895,13 +1318,13 @@ function resumeSession(s) {
         // The transcript says which model this session has been running (scan.js reads
         // it off the newest assistant record), so a resumed tab opens wearing the same
         // letter it wore before - and the "C" only when nothing has answered in it yet.
-        iconPath: shared.claudeIcon(modelLetter(s.model)),
+        ...shared.tabMark(modelLetter(s.model)),
         location: claudeLocation(),
         env: { CLAUDE_CODE_DISABLE_TERMINAL_TITLE: '1' }
     });
     terminal.show();
     terminal.sendText('claude --resume ' + s.id, true);
-    trackClaude(terminal, cwd, inEditor, { resumeId: s.id });
+    trackClaude(terminal, cwd, inEditor, { resumeId: s.id, letter: modelLetter(s.model) });
     if (inEditor) settleIntoGroup(targetCol);
 }
 
@@ -961,6 +1384,33 @@ async function showSession(id) {
 /// Does this session have a live terminal tab in THIS window?
 function hasLocalTerminal(id) {
     return shared.claudeRecs.some((r) => r.sessionId === id && vscode.window.terminals.includes(r.terminal));
+}
+
+/// The live terminal a session is running in HERE - the only thing that can be typed into
+/// on its behalf (answer.js). Nothing for a session with no tab in this window, and
+/// nothing for a shell VS Code revived empty after a quit: it wears the name, but there is
+/// no claude behind it to receive a keystroke.
+function terminalFor(id) {
+    const rec = shared.claudeRecs.find((r) => r.sessionId === id && !r.revived &&
+        vscode.window.terminals.includes(r.terminal));
+    return rec ? rec.terminal : null;
+}
+
+/// The opposite of clicking the light: close the terminal tab this session is running
+/// in. Nothing here is destructive - the transcript is on disk, so the light stays one
+/// click from a `claude --resume` - and the tab's own close event does the rest of the
+/// bookkeeping (claudeTabClosed: binding dropped, session retired to idle, bar
+/// re-rendered), exactly as if the tab had been closed by hand.
+/// No confirmation, per the same ruling as the click that opens one: a hover link that
+/// stops to ask is a hover link nobody uses. A revived shell counts as a tab here even
+/// though its light does not - it is still a tab sitting there to be closed.
+function closeTab(id) {
+    const rec = shared.claudeRecs.find((r) => r.sessionId === id &&
+        vscode.window.terminals.includes(r.terminal));
+    if (!rec) return;                      // already gone - the next render drops the link
+    const s = shared.sessions.get(id);
+    shared.nlog('close tab: ' + ((s && s.name) || String(id).slice(0, 8)) + ' (hover)');
+    try { rec.terminal.dispose(); } catch { /* already gone */ }
 }
 
 /// ...and is that tab an EMPTY SHELL restored from a quit? It wears the session's
@@ -1087,7 +1537,7 @@ function renameWhy(why) {
 }
 
 /// A title only Chutdown writes: a traffic light, a space, a session word.
-const LIGHT_TITLE = /^(?:🟢|🟠|🔴|⚪) (.{1,14})$/u;
+const LIGHT_TITLE = /^(?:🟢|🟠|🟡|🔴|⚪) (.{1,14})$/u;
 
 /// The active tab is NOT one the normal rename path may touch - so if it is wearing a
 /// "<light> <name>" title for a session whose tab it is not, one of our renames landed
@@ -1269,10 +1719,12 @@ function claudeTabClosed(terminal) {
 Object.assign(module.exports, {
     trackClaude, activeViewColumn, claudeLocation, settleIntoGroup,
     claudeButtons, buildClaudeButtons, paintClaudeButtons, buttonLabels,
-    newClaude, newClaudeSlot, slotEntries, modelLetter, letterIcon,
+    newClaude, newClaudeSlot, slotEntries, modelLetter, letterIcon, modelVendor, vendorColor, codexMark,
+    TITLE_SLOTS, MODEL_CATALOG,
     pickModels,
-    showSession, hasLocalTerminal, revivedTab, savedTabSessions, everBoundHere,
-    bindClaudeTerminals, renameActiveClaude, sweepTabTitles, claimTab, manualWord,
+    showSession, closeTab, hasLocalTerminal, terminalFor, revivedTab, savedTabSessions, everBoundHere,
+    bindClaudeTerminals, renameActiveClaude, sweepTabTitles, refreshTabMarks, pollTabMarks, armTabMarks,
+    claimTab, manualWord,
     adoptClaude, claudeTabClosed, saveBindings, restoreBinding, loadPendingBindings, preferredShell,
     reviveClaudeTabs   // exported for the smoke test; the timer in loadPendingBindings runs it
 });

@@ -34,26 +34,36 @@ function firstRoot() {
 
 function normCwd(p) { return (p || '').replace(/[\\/]+$/, '').toLowerCase(); }
 
-// The claude tab icon: the Chutdown "C" (open ring + power bar) as a light/dark SVG
-// pair, sitting where the `blank` codicon used to leave the tab with no mark at all.
-// The files live in media/, one level up from src/.
+// The claude tab MARK - the `iconPath` and `color` a claude terminal is created with.
+// A tab launched for a KNOWN model wears that model's letter: O / F / S / H for the
+// Claude models, S / T / L / M for the OpenAI ones (Sol and Sonnet share the letter -
+// the colour tells the two S marks apart, which is the whole reason the letters carry
+// one); a tab whose model nobody knows - the + dropdown profile, a hand-typed custom
+// model - wears the Chutdown "C" (open ring + power bar).
 //
-// A tab launched for a KNOWN model wears that model's letter instead - the very same
-// O / F / S / H resources the editor title buttons use, so the mark on the tab is the
-// mark on the button that opened it. VS Code freezes iconPath at createTerminal time,
-// so this can only ever say what we KNEW when the tab was made: what we launched, or -
-// for a resumed session - the model the transcript's newest assistant record names
-// (scan.js reads it, resumeSession passes it). A hand-typed custom model and the +
-// dropdown profile still keep the "C".
-const ICONS = path.join(__dirname, '..', 'media');
-const LETTER_ICONS = new Set(['o', 'f', 's', 'h']);
-function claudeIcon(letter) {
+// The mark is a GLYPH from our own icon font (media/chutdown.ttf, package.json
+// `contributes.icons`, built by media/make-font.js from the same geometry as the
+// media/letter-*.svg the editor title buttons draw), NOT the SVG pair it used to be.
+// A terminal's icon is frozen at createTerminal time, and a file-URI icon does not
+// survive a window reload at all: the reconnected tab comes back wearing the
+// workbench's default mark (seen 2026-08-22 - four lettered tabs, four "≡"), and the
+// only cure was to reopen the tab, which kills the claude in it and with it the Tab
+// suggestion sitting in its prompt. A ThemeIcon is persisted by id and comes back as
+// it was, so a reload costs nothing. The price is the colour: a terminal tab icon
+// takes only the standard terminal.ansi* theme colours, so the tab letter wears the
+// theme's ansiYellow (Claude) / ansiBlue (OpenAI) rather than the exact #E8936A /
+// #8FC6FF the SVGs and the status bar use. Still, the mark can only say what we KNEW
+// when the tab was made - what we launched, or for a resumed session the model the
+// transcript names; a tab whose letter turns out wrong is reopened by
+// claude.refreshTabMarks, and that is the one thing left that costs a reopen.
+const GLYPHS = { claude: new Set(['o', 'f', 's', 'h']), openai: new Set(['s', 't', 'l', 'm']) };
+const MARK_COLOR = { claude: 'terminal.ansiYellow', openai: 'terminal.ansiBlue' };
+/// `vendor` is 'claude' (default) or 'openai'. Spread into createTerminal's options.
+function tabMark(letter, vendor) {
     const l = String(letter || '').toLowerCase();
-    const base = LETTER_ICONS.has(l) ? 'letter-' + l : 'tab-claude';
-    return {
-        light: vscode.Uri.file(path.join(ICONS, base + '-light.svg')),
-        dark: vscode.Uri.file(path.join(ICONS, base + '-dark.svg'))
-    };
+    const v = vendor === 'openai' ? 'openai' : 'claude';
+    const id = GLYPHS[v].has(l) ? 'chutdown-letter-' + l : 'chutdown-c';
+    return { iconPath: new vscode.ThemeIcon(id), color: new vscode.ThemeColor(MARK_COLOR[v]) };
 }
 
 // ------------------------------------------- one name, one tab
@@ -248,7 +258,7 @@ function clearGate(gate) {
 
 Object.assign(module.exports, {
     PROJECTS, TASKS, SESSIONS, sessions, suppressed, termRecs, claudeRecs, items, state,
-    cfg, sleep, quiet, firstRoot, normCwd, claudeIcon, uniqueName, flat, humanize, coarse,
+    cfg, sleep, quiet, firstRoot, normCwd, tabMark, uniqueName, flat, humanize, coarse,
     paint, unpaint, nlog,
     mdText, mdCode, disposeLog, saveSuppressed, loadSuppressed, addGate, clearGate
 });
