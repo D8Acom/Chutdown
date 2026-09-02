@@ -14,7 +14,7 @@ const platform = require('./platform');
 const claude = require('./claude');
 const density = require('./density');
 // Both file syntaxes - JSON and the original one-per-line - live in their own module.
-const { parseTerminalsFile, sampleJson } = require('./terminals');
+const { parseTerminalsFile, sampleJson, report } = require('./terminals');
 
 const isClaudeCommand = (cmd) => /^\s*claude(\s|$)/i.test(String(cmd || ''));
 // A `codex` entry is not a managed claude tab (no light, no rename), but it can still
@@ -124,14 +124,33 @@ function findTerminalsFile(folders) {
 /// ERR_SOCKET_BAD_PORT synchronously on anything over 65535: that throw came out of
 /// probePort, out of the poll, and killed every tick after it - lights frozen and,
 /// with the toggle armed, the power action silently never firing again.
-function entryPort(e) {
+/// `problems` is the same optional array the parser fills: a port dropped HERE is a
+/// problem with the file exactly like one dropped in the parser, and it used to be the
+/// one that could only ever be found in the output channel.
+function entryPort(e, problems) {
     if (e.port !== undefined) return e.port;   // already validated by the parser
     const portMatch = e.name.match(/:(\d+)\s*$/);
     const named = portMatch ? Number(portMatch[1]) : undefined;
     if (named !== undefined && named >= 1 && named <= 65535) return named;
     if (named !== undefined)
-        shared.nlog('"' + e.name + '": ' + named + ' is not a port (1-65535) - treating the name as plain text');
+        report(problems, '"' + e.name + '": ' + named + ' is not a port (1-65535) - treating the name as plain text');
     return undefined;
+}
+
+/// A warning that carries the parse problems with it AND a way to read them in full.
+/// Only the first three are spelled out - a notification is one line wide and the rest
+/// are already in the channel, which is exactly what the button opens. The button is the
+/// point of the whole change: "see the output channel" is an instruction, "Show problems"
+/// is one click, and a line in a channel nobody has open is indistinguishable from the
+/// silent no-op it describes.
+const PROBLEMS_SHOWN = 3;
+function warnWithProblems(text, problems) {
+    const list = (problems || []).slice(0, PROBLEMS_SHOWN).join('  •  ');
+    const more = (problems || []).length > PROBLEMS_SHOWN
+        ? '  •  …and ' + (problems.length - PROBLEMS_SHOWN) + ' more' : '';
+    const body = text + (list ? '  ' + list + more : '');
+    return vscode.window.showWarningMessage(body, 'Show problems')
+        .then((pick) => { if (pick === 'Show problems') shared.showLog(); });
 }
 
 /// Launch one entry: terminal, status bar light, record. Shared by "Start all" and the
@@ -221,7 +240,12 @@ async function startAllBody() {
     // takes the whole file with it - and "has no entries" would be a lie about a file
     // with six servers in it. The message carries the line and column.
     let entries;
-    try { entries = parseTerminalsFile(fs.readFileSync(filePath, 'utf8')); }
+    // Every entry the parser HAD to skip lands here as well as in the channel, so the
+    // notice at the end of this function can count them. Six servers listed and three
+    // launched used to read "3 launched, 0 already running" with no light, no line and
+    // nothing on screen connecting the two.
+    const problems = [];
+    try { entries = parseTerminalsFile(fs.readFileSync(filePath, 'utf8'), problems); }
     catch (e) {
         shared.nlog(fileName + ': ' + e.message);
         const open = await vscode.window.showErrorMessage(
@@ -233,7 +257,17 @@ async function startAllBody() {
         return;
     }
     if (entries.length === 0) {
-        vscode.window.showWarningMessage(fileName + ' has no entries ("name": "command").');
+        // "has no entries" is only the truth about an EMPTY file. A file with three
+        // entries in it, all three unreadable, was told the same thing - which sends
+        // the reader looking for the servers they can see in front of them.
+        // Not awaited, here or below: `launching` is only cleared when this function
+        // returns, and waiting for someone to dismiss a toast would lock the button out
+        // of a second launch for as long as the notification sits there.
+        if (problems.length)
+            warnWithProblems(fileName + ': nothing could be launched - ' +
+                problems.length + ' problem(s) in the file:', problems);
+        else
+            vscode.window.showWarningMessage(fileName + ' has no entries ("name": "command").');
         return;
     }
 
@@ -264,7 +298,7 @@ async function startAllBody() {
         if (existing && vscode.window.terminals.includes(existing.terminal)) {
             try { existing.terminal.dispose(); } catch { }
         }
-        todo.push({ e, idx, cwd, port: entryPort(e) });
+        todo.push({ e, idx, cwd, port: entryPort(e, problems) });
     }
 
     // Clear the way first. A ":port" entry we are about to (re)launch takes its port
@@ -291,16 +325,24 @@ async function startAllBody() {
         launched++;
     }
     updateStopItem();
+    // The count says "problem(s) in <file>", not "entries that did not launch": a bad
+    // port is reported and then dropped, and that entry DOES launch - without its port,
+    // and so without its liveness probe. Saying "3 entries could not be read" about a
+    // file where one of the three started anyway would be a second wrong number after
+    // the one this change exists to fix.
     const msg = 'Terminals: ' + launched + ' launched, ' + skipped + ' already running' +
-        (freed ? ', ' + freed + ' busy port(s) force-freed first' : '') + '.';
+        (freed ? ', ' + freed + ' busy port(s) force-freed first' : '') +
+        (problems.length ? ', ' + problems.length + ' problem(s) in ' + fileName : '') + '.';
     // A port that would not let go is the one thing worth interrupting for: the server
     // about to launch will silently bind the NEXT port instead, which is exactly what
     // freePortsOnStart exists to prevent - and a cheerful "launched" notice would be
-    // the only thing said about it.
-    if (stuck.length)
-        vscode.window.showWarningMessage(msg + ' Port ' + stuck.join(', ') +
-            ' could not be freed - something else still holds it, so that server may ' +
-            'bind a different port. See the Chutdown output channel.');
+    // the only thing said about it. An entry the file could not describe is now the
+    // other: both take the warning, and both get the button that opens the lines.
+    const portNote = stuck.length
+        ? ' Port ' + stuck.join(', ') + ' could not be freed - something else still holds it, ' +
+          'so that server may bind a different port.'
+        : '';
+    if (stuck.length || problems.length) warnWithProblems(msg + portNote, problems);
     else vscode.window.showInformationMessage(msg);
 }
 
@@ -601,7 +643,8 @@ async function launchOneFromFileBody(name, onlyIfDown) {
     const filePath = findTerminalsFile(ws);
     if (!filePath) { shared.nlog('restart "' + name + '": no .terminals file in the workspace root'); return false; }
     let entries;
-    try { entries = parseTerminalsFile(fs.readFileSync(filePath, 'utf8')); }
+    const problems = [];
+    try { entries = parseTerminalsFile(fs.readFileSync(filePath, 'utf8'), problems); }
     catch (e) { shared.nlog('restart "' + name + '": ' + path.basename(filePath) + ': ' + e.message); return false; }
     const want = String(name || '').trim().toLowerCase();
     let idx = 0, hit = null, hitIdx = 0;
@@ -614,6 +657,15 @@ async function launchOneFromFileBody(name, onlyIfDown) {
     if (!hit) {
         shared.nlog('restart "' + name + '": no such entry in ' + path.basename(filePath) +
             ' (have: ' + (entries.map((e) => e.name).join(', ') || 'nothing') + ')');
+        // "no such entry" is the wrong answer when the entry IS in the file and the
+        // parser dropped it: the agent reading this line goes off to add an entry that
+        // is already there. The reasons are a few lines further up in the channel, so
+        // they are repeated HERE, attached to the question that was asked.
+        if (problems.length)
+            shared.nlog('restart "' + name + '": ' + problems.length + ' entr' +
+                (problems.length === 1 ? 'y' : 'ies') + ' in ' + path.basename(filePath) +
+                ' could not be read, and one of them may be the one asked for - ' +
+                problems.join(' | '));
         return false;
     }
     const root = path.dirname(filePath);

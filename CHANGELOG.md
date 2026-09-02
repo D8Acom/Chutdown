@@ -3,6 +3,22 @@
 All notable changes to Chutdown are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- **An entry `.terminals` could not be read is now said on screen, not only in the output
+  channel.** The launch notice counted the entries it skipped for being *already running*
+  and nothing else, so a file with six servers in it could launch three and report
+  "3 launched, 0 already running" — with the three reasons sitting in View → Output →
+  Chutdown, where nobody had looked. The parser now takes an optional array and collects
+  every line it logs (no command, a duplicate name, an unknown field, a value that is not
+  a command or an object, a port outside 1–65535 — including the one `entryPort` drops for
+  a `name:99999` line). "Start all" appends `N problem(s) in .terminals` to its summary,
+  shows it as a warning naming the first three, and offers a **Show problems** button that
+  reveals the channel. A file whose entries are *all* unreadable no longer claims it "has
+  no entries", and a by-name `/restart` that misses says the entry may be one the parser
+  dropped rather than only "no such entry". A clean file behaves exactly as before.
+
 ## [0.1.8] - 2026-08-24
 
 ### Added

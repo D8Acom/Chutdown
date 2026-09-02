@@ -30,6 +30,18 @@
 
 const shared = require('./shared');
 
+/// EVERY reason an entry was dropped goes through here, and there is no other way to
+/// say one. It still writes the same line into the output channel it always did; when
+/// the caller hands in an array it is ALSO collected there, so a batch launch can put
+/// "3 problems" on screen next to its "3 launched" instead of leaving the other three
+/// servers to be noticed by someone who happens to have View -> Output open. The
+/// argument is optional at every level, so a caller that passes nothing (the smoke
+/// suite, anything outside batch.js) behaves exactly as before.
+function report(problems, msg) {
+    shared.nlog(msg);
+    if (Array.isArray(problems)) problems.push(msg);
+}
+
 /// A field can be spelled more than one way - `cmd`/`command`/`run` are the same
 /// thing, and being told "unknown field: command" for the obvious spelling is a worse
 /// experience than accepting all three.
@@ -64,11 +76,11 @@ function splitName(key) {
 
 /// Ports are validated HERE, not at launch: `net.connect` throws ERR_SOCKET_BAD_PORT
 /// synchronously on anything over 65535, and that throw would come out of the poll.
-function validPort(port, where) {
+function validPort(port, where, problems) {
     if (port === undefined || port === null || port === '') return undefined;
     const n = typeof port === 'number' ? port : Number(String(port).trim());
     if (!Number.isInteger(n) || n < 1 || n > 65535) {
-        shared.nlog('.terminals: "' + where + '": ' + JSON.stringify(port) +
+        report(problems, '.terminals: "' + where + '": ' + JSON.stringify(port) +
             ' is not a port (1-65535) - ignoring it');
         return undefined;
     }
@@ -77,7 +89,7 @@ function validPort(port, where) {
 
 // ---- the line syntax --------------------------------------------------------
 
-function parseLineTerminals(text) {
+function parseLineTerminals(text, problems) {
     const entries = [];
     // The NAME is the key - of the record, of the status bar item, of the click that
     // reveals the tab. Two lines sharing one is not two terminals, it is one terminal
@@ -92,7 +104,7 @@ function parseLineTerminals(text) {
         const { name, sub } = splitName(line.slice(0, eq));
         const command = line.slice(eq + 1).trim();
         if (!name || !command) continue;
-        if (names.has(name)) { shared.nlog('.terminals: "' + name + '" is listed twice - the second one is ignored'); continue; }
+        if (names.has(name)) { report(problems, '.terminals: "' + name + '" is listed twice - the second one is ignored'); continue; }
         names.add(name);
         entries.push({ name, sub, command });
     }
@@ -158,9 +170,10 @@ function jsonMessage(src, err) {
 }
 
 /// One entry from a key/value pair. Returns null - with a line in the output channel
-/// saying why - for anything that could not become a terminal, because a `.terminals`
-/// entry that silently does not launch is the failure this whole file exists to avoid.
-function jsonEntry(key, value, names) {
+/// saying why, and a copy of that line in `problems` when the caller asked for one -
+/// for anything that could not become a terminal, because a `.terminals` entry that
+/// silently does not launch is the failure this whole file exists to avoid.
+function jsonEntry(key, value, names, problems) {
     let raw = key, command, cwd, port;
     if (typeof value === 'string' || typeof value === 'number') {
         command = String(value);
@@ -171,36 +184,36 @@ function jsonEntry(key, value, names) {
         port = value.port;
         for (const k of Object.keys(value))
             if (!KNOWN_KEYS.has(k))
-                shared.nlog('.terminals: "' + raw + '": unknown field "' + k +
+                report(problems, '.terminals: "' + raw + '": unknown field "' + k +
                     '" - expected one of ' + [...KNOWN_KEYS].join(', '));
     } else {
-        shared.nlog('.terminals: "' + raw + '": expected a command string or an object, got ' +
+        report(problems, '.terminals: "' + raw + '": expected a command string or an object, got ' +
             (value === null ? 'null' : Array.isArray(value) ? 'an array' : typeof value));
         return null;
     }
     if (raw === undefined || String(raw).trim() === '') {
-        shared.nlog('.terminals: an entry has no name - give it one (the name is its status bar light).');
+        report(problems, '.terminals: an entry has no name - give it one (the name is its status bar light).');
         return null;
     }
     const { name, sub } = splitName(raw);
     const folder = cwd === undefined ? sub : String(cwd).trim();
-    if (!name) { shared.nlog('.terminals: an entry has no name before its "@" - skipped.'); return null; }
+    if (!name) { report(problems, '.terminals: an entry has no name before its "@" - skipped.'); return null; }
     if (typeof command !== 'string' || !command.trim()) {
-        shared.nlog('.terminals: "' + name + '" has no command - add "cmd": "npm run dev".');
+        report(problems, '.terminals: "' + name + '" has no command - add "cmd": "npm run dev".');
         return null;
     }
     if (names.has(name)) {
-        shared.nlog('.terminals: "' + name + '" is listed twice - the second one is ignored');
+        report(problems, '.terminals: "' + name + '" is listed twice - the second one is ignored');
         return null;
     }
     names.add(name);
-    return { name, sub: folder, command: command.trim(), port: validPort(port, name) };
+    return { name, sub: folder, command: command.trim(), port: validPort(port, name, problems) };
 }
 
 /// Throws on malformed JSON - the caller turns that into a notification. Anything that
 /// parses but does not describe a terminal is logged and skipped instead: one bad
 /// entry should not stop the other five servers from starting.
-function parseJsonTerminals(text) {
+function parseJsonTerminals(text, problems) {
     const src = relaxJson(text);
     let data;
     try { data = JSON.parse(src); }
@@ -214,13 +227,13 @@ function parseJsonTerminals(text) {
     const entries = [];
     if (Array.isArray(data)) {
         for (const item of data) {
-            const e = jsonEntry(undefined, item, names);
+            const e = jsonEntry(undefined, item, names, problems);
             if (e) entries.push(e);
         }
     } else if (data && typeof data === 'object') {
         for (const [key, value] of Object.entries(data)) {
             if (key === '$schema' || isNoteKey(key)) continue;
-            const e = jsonEntry(key, value, names);
+            const e = jsonEntry(key, value, names, problems);
             if (e) entries.push(e);
         }
     } else {
@@ -241,9 +254,15 @@ function parseJsonTerminals(text) {
 /// line syntax never noticed - it trims each line itself - so this only ever bit files
 /// something else had written: PowerShell `Out-File -Encoding utf8`, or an editor set
 /// to `files.encoding: utf8bom`. The Create button writes clean UTF-8.
-function parseTerminalsFile(text) {
+///
+/// `problems` is an OPTIONAL array: hand one in and every line this parse writes to the
+/// output channel is pushed into it as well, in the order it happened, so the caller can
+/// say on screen how many entries it could not read. Hand in nothing and this behaves
+/// exactly as it always has - the return value is the entries either way, never a pair,
+/// so no existing caller has to change.
+function parseTerminalsFile(text, problems) {
     const src = String(text).replace(/^﻿/, '');
-    return looksLikeJson(src) ? parseJsonTerminals(src) : parseLineTerminals(src);
+    return looksLikeJson(src) ? parseJsonTerminals(src, problems) : parseLineTerminals(src, problems);
 }
 
 /// The sample the button writes - strict JSON, so no editor anywhere underlines it in
@@ -320,4 +339,4 @@ function sampleJson(root) {
     ].join('\n');
 }
 
-Object.assign(module.exports, { parseTerminalsFile, looksLikeJson, sampleJson });
+Object.assign(module.exports, { parseTerminalsFile, looksLikeJson, sampleJson, report });

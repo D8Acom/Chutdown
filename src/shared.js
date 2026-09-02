@@ -224,10 +224,22 @@ function loadSuppressed() {
 
 let outChannel = null;
 
-function nlog(msg) {
+function channel() {
     if (!outChannel) outChannel = vscode.window.createOutputChannel('Chutdown');
-    outChannel.appendLine(new Date().toLocaleTimeString() + '  ' + msg);
+    return outChannel;
 }
+
+function nlog(msg) {
+    channel().appendLine(new Date().toLocaleTimeString() + '  ' + msg);
+}
+
+/// Put the channel on screen - what a notification's "Show problems" button calls, so
+/// the short list in the toast can be read in full where it was written. It goes through
+/// `channel()` rather than testing `outChannel`, so the button can never be a no-op: a
+/// channel that does not exist yet is created and shown empty, which at least says where
+/// to look. `preserveFocus` keeps the caret in the editor - the panel is opened to be
+/// read, not typed in.
+function showLog() { channel().show(true); }
 
 /// Created lazily on the first log line, so it cannot be pushed to
 /// context.subscriptions at activation - extension.js disposes it through this
@@ -259,6 +271,6 @@ function clearGate(gate) {
 Object.assign(module.exports, {
     PROJECTS, TASKS, SESSIONS, sessions, suppressed, termRecs, claudeRecs, items, state,
     cfg, sleep, quiet, firstRoot, normCwd, tabMark, uniqueName, flat, humanize, coarse,
-    paint, unpaint, nlog,
+    paint, unpaint, nlog, showLog,
     mdText, mdCode, disposeLog, saveSuppressed, loadSuppressed, addGate, clearGate
 });
