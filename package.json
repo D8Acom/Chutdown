@@ -14,7 +14,7 @@
   "categories": ["Other"],
   "activationEvents": ["*"],
   "main": "./extension.js",
-  "scripts": { "test": "node test/smoke.js" },
+  "scripts": { "test": "node tests/smoke.js", "test:full": "node test/smoke.js" },
   "contributes": {
     "icons": {
       "chutdown-letter-o": { "description": "Opus - the O launch mark", "default": { "fontPath": "./media/chutdown.ttf", "fontCharacter": "\\E001" } },

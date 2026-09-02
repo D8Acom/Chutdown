@@ -32,8 +32,13 @@ TWEETME.md
 # Publishing the workflow without the suite would be worse than either - the job would
 # fail on a missing file rather than on a real assertion - so both come out together.
 # Neither file is deleted; both stay on disk, and go back in once the gate is found.
-# package.json still declares `"test": "node test/smoke.js"` deliberately: it is what the
-# published VSIX carries, and it becomes true again the moment these are restored.
+# package.json used to declare `"test": "node test/smoke.js"` deliberately, so that the
+# script became true again the moment these were restored. It no longer can: on every
+# clone but this one that script was a MODULE_NOT_FOUND, including on the group's rented
+# box, where it is the `smoke` entry in .d8a. So `test` now runs the checked-in public
+# suite (tests/smoke.js, which is committed) and this held-back one keeps its own script:
+#     npm test       -> node tests/smoke.js    (public, runs anywhere)
+#     npm run test:full -> node test/smoke.js  (this box, while test/ is held back)
 test/
 .github/workflows/test.yml
 
