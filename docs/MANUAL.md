@@ -1843,7 +1843,22 @@ lives).
 
 ## `npm test` — the smoke suite
 
-`node test/smoke.js` (or `npm test`). No dependencies, no build step, nearly 800
+There are two, and they are run by different commands.
+
+**`npm test` (`node tests/smoke.js`) — the public suite, in this repository.** Zero
+dependencies, no build step, nothing spawned, no network and no temp files: it installs
+`tests/vscode-stub.js` under the name `vscode` (patching `Module._load`, since that
+module only exists inside the editor) and then asserts the pure logic the real files
+export — `.terminals` parsing in every shape it accepts (BOM, `//` note keys, ports,
+comments and trailing commas, the legacy `web:3003 @ D8A = npm run dev` line, duplicate
+names, a syntax error carrying a line and column), the status bar density ladder,
+`usage.parseLimits` against both response shapes, and the Windows power and countdown
+command strings. It prints `N passed, 0 failed` and exits non-zero on any failure, so it
+is also what the `smoke` entry in the root `.d8a` runs on the group's server. Add a case
+by writing a function and registering it with `test('what it must do', fn)`.
+
+**`npm run test:full` (`node test/smoke.js`) — the author's full suite**, which is not in
+this repository (see `.gitignore`). Nearly 800
 assertions, about ten seconds — it spawns real processes and writes real transcripts to a
 temp dir, so it is no longer instant.
 Every module opens with `require('vscode')`, which exists only inside

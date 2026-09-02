@@ -9,8 +9,11 @@
 .terminals
 
 # tests are development-only. media/make-chime.js stays: the chutdown.soundFile
-# setting description tells users to edit and re-run it.
+# setting description tells users to edit and re-run it. Two directories, because there
+# are two suites: test/ is the author's full one (held back from the public repo) and
+# tests/ is the checked-in public smoke suite `npm test` runs. Neither ships in the VSIX.
 test/**
+tests/**
 
 # source logos live in the repo, not the package. The SVGs contributes.icons names -
 # media/letter-*.svg, media/tab-claude-*.svg - DO ship; these two are the drawing
