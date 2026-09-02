@@ -878,7 +878,10 @@ function paintNothingYet(usageItem) {
     // toggle that is ignored on this platform.
     const keychain = credState === 'keychain:off';
     const md = new vscode.MarkdownString();
-    md.isTrusted = { enabledCommands: ['workbench.action.openSettings', 'chutdown.openUsagePage'] };
+    // chutdown.showLog is on this list because isTrusted is scoped BY NAME: a command
+    // link the list does not name is dead text. Its worst case is a read-only output
+    // channel being revealed without focus.
+    md.isTrusted = { enabledCommands: ['workbench.action.openSettings', 'chutdown.openUsagePage', 'chutdown.showLog'] };
     // Without this the codicons in the links below render as the literal text
     // '$(link-external)', which is what they were doing here before.
     md.supportThemeIcons = true;
@@ -895,7 +898,8 @@ function paintNothingYet(usageItem) {
     if (why) md.appendMarkdown('_' + shared.mdText(why) + '_  \n');
     if (keychain) md.appendMarkdown('\n[$(gear) chutdown.usageKeychain]' +
         '(command:workbench.action.openSettings?%22chutdown.usageKeychain%22)  \n');
-    md.appendMarkdown('\n[$(link-external) claude.ai usage settings](command:chutdown.openUsagePage)');
+    md.appendMarkdown('\n[$(link-external) claude.ai usage settings](command:chutdown.openUsagePage)' +
+        ' - [$(output) Open log](command:chutdown.showLog)');
     setCommand(usageItem, keychain ? KEYCHAIN_SETTING : 'chutdown.openUsagePage');
     // '$(pulse) usage' without the question mark: the meter's own icon, and a label that
     // states what the slot is rather than asking the user something they cannot answer.
@@ -970,7 +974,7 @@ function renderUsage() {
     // The two links below. openSettings is VS Code's own, and the only argument it is ever
     // given here is a literal setting id written in this file - nothing from the endpoint,
     // the account or the disk reaches it.
-    md.isTrusted = { enabledCommands: ['chutdown.openUsagePage', 'workbench.action.openSettings'] };
+    md.isTrusted = { enabledCommands: ['chutdown.openUsagePage', 'workbench.action.openSettings', 'chutdown.showLog'] };
     // Escaped, like every other hover in the extension (shared.js says why). None of
     // these three is text this file wrote:  is built from the account's own
     // subscriptionType,  is title-cased from an ARBITRARY key in the endpoint's
@@ -1017,7 +1021,11 @@ function renderUsage() {
     if (credState === 'keychain:off')
         md.appendMarkdown('\n[$(gear) chutdown.usageKeychain]' +
             '(command:workbench.action.openSettings?%22chutdown.usageKeychain%22)  \n');
-    md.appendMarkdown('\n[$(link-external) claude.ai usage settings](command:chutdown.openUsagePage)');
+    md.appendMarkdown('\n[$(link-external) claude.ai usage settings](command:chutdown.openUsagePage)' +
+        // The refresh failure and the credential state above are one line each here and a
+        // fuller diagnosis in the channel ('the Keychain read failed - see the Chutdown
+        // output channel'); this is the click that opens it.
+        ' - [$(output) Open log](command:chutdown.showLog)');
     // A reading has landed, so the meter is a meter again: whatever the click was pointed
     // at while there was nothing to show, it comes back here.
     setCommand(usageItem, limits.length > 1 ? 'chutdown.cycleUsageFocus' : 'chutdown.openUsagePage');

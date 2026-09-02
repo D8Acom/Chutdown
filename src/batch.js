@@ -297,10 +297,14 @@ async function startAllBody() {
     // about to launch will silently bind the NEXT port instead, which is exactly what
     // freePortsOnStart exists to prevent - and a cheerful "launched" notice would be
     // the only thing said about it.
+    // The button is the sentence: "see the output channel" used to be directions to a
+    // dropdown entry that may not exist yet (the channel is created on its first line),
+    // and chutdown.showLog both creates and reveals it in one click.
     if (stuck.length)
         vscode.window.showWarningMessage(msg + ' Port ' + stuck.join(', ') +
             ' could not be freed - something else still holds it, so that server may ' +
-            'bind a different port. See the Chutdown output channel.');
+            'bind a different port.', 'Open log')
+            .then((pick) => { if (pick === 'Open log') shared.showLog(); });
     else vscode.window.showInformationMessage(msg);
 }
 

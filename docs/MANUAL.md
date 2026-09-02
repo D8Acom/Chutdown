@@ -855,7 +855,8 @@ the dialog has highlighted — the first one, and by convention the recommended 
 else is ever typed: no arrow keys, no text, no second press. Only the window whose tab it
 is can do it (a session running in another window is that window's to answer, and a shell
 VS Code revived empty after a quit has nothing listening in it). Each answer is a line in
-**View → Output → Chutdown**.
+**View → Output → Chutdown** (or run **`Chutdown: Show Log`**, which opens the same
+channel in one click).
 
 **One setting per gear**, because the four are four different situations:
 
@@ -1823,6 +1824,23 @@ the main transcript first, and that is statted every scan regardless, so they st
 on the same scan the session comes back to life.
 
 Together: **~38 ms per scan → ~9 ms** on a store of 600 transcripts across 22 projects.
+
+## The log — `Chutdown: Show Log`
+
+Everything this manual calls "a line in the output channel" — a skipped `.terminals`
+entry, a namer that gave up, a port that would not let go, a Keychain read that failed,
+each auto-answered Enter — is written to the **Chutdown** output channel, and
+**`Chutdown: Show Log`** in the Command Palette is the one click that opens it. The
+channel is created on demand, so the command works on a fresh window that has not logged
+anything yet — before, following *View → Output → Chutdown* in that state found no
+`Chutdown` entry in the dropdown at all, because the channel had not been created.
+
+The same command is reachable where the messages that mention the log are: the
+force-freed-port warning after **Start All Terminals** carries an **Open log** button, and
+the usage meter's hover — the one that says *the Keychain read failed — see the Chutdown
+output channel* — carries an **Open log** link. Nothing is written by opening it: the
+channel is read-only, and it is revealed *without* stealing focus, so the cursor stays
+where you were typing.
 
 ## How it's put together
 

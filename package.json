@@ -53,6 +53,7 @@
       { "command": "chutdown.copyTerminalLog", "title": "Chutdown: Copy Terminal Log" },
       { "command": "chutdown.openUsagePage", "title": "Chutdown: Open Claude Usage Page" },
       { "command": "chutdown.cycleUsageFocus", "title": "Chutdown: Show Next Usage Limit" },
+      { "command": "chutdown.showLog", "title": "Chutdown: Show Log" },
       { "command": "chutdown.newClaudeSlot1", "title": "Opus - the everyday workhorse: complex agentic coding, multi-file features, larger refactors, long autonomous runs. Start here. (Editor title icon - shown while Opus is one of your launch buttons; change them with 'Chutdown: Choose Models')", "icon": { "light": "media/letter-o-light.svg", "dark": "media/letter-o-dark.svg" } },
       { "command": "chutdown.newClaudeSlot2", "title": "Fable - the most capable model, and the priciest: the hardest reasoning and longest-horizon work, the tasks Opus does not finish. (Editor title icon - shown while Fable is one of your launch buttons; change them with 'Chutdown: Choose Models')", "icon": { "light": "media/letter-f-light.svg", "dark": "media/letter-f-dark.svg" } },
       { "command": "chutdown.newClaudeSlot3", "title": "Sonnet - near-Opus quality on coding and agentic work at a fraction of the cost: the cost-conscious pick for ordinary tasks. (Editor title icon - shown while Sonnet is one of your launch buttons; change them with 'Chutdown: Choose Models')", "icon": { "light": "media/letter-s-light.svg", "dark": "media/letter-s-dark.svg" } },

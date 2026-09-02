@@ -229,6 +229,19 @@ function nlog(msg) {
     outChannel.appendLine(new Date().toLocaleTimeString() + '  ' + msg);
 }
 
+/// Reveal the channel the whole extension has been pointing people at. Every
+/// "see the Chutdown output channel" sentence used to be a set of directions
+/// (View -> Output -> pick Chutdown from the dropdown) with a dead end at the
+/// end of it: the channel is created lazily on its first line, so a window that
+/// has not logged anything yet has no 'Chutdown' entry in that dropdown at all.
+/// Creating it here fixes that - the channel exists from the moment somebody
+/// asks for it - and show(true) preserves focus, so revealing the log does not
+/// take the cursor out of the terminal or the editor the user is working in.
+function showLog() {
+    if (!outChannel) outChannel = vscode.window.createOutputChannel('Chutdown');
+    outChannel.show(true);   // true = preserveFocus
+}
+
 /// Created lazily on the first log line, so it cannot be pushed to
 /// context.subscriptions at activation - extension.js disposes it through this
 /// instead, or the channel outlives the extension in the Output dropdown.
@@ -259,6 +272,6 @@ function clearGate(gate) {
 Object.assign(module.exports, {
     PROJECTS, TASKS, SESSIONS, sessions, suppressed, termRecs, claudeRecs, items, state,
     cfg, sleep, quiet, firstRoot, normCwd, tabMark, uniqueName, flat, humanize, coarse,
-    paint, unpaint, nlog,
+    paint, unpaint, nlog, showLog,
     mdText, mdCode, disposeLog, saveSuppressed, loadSuppressed, addGate, clearGate
 });
