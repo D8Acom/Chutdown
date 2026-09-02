@@ -867,12 +867,19 @@ VS Code revived empty after a quit has nothing listening in it). Each answer is 
 | `autoAnswerOff` | off | for a run you leave going overnight wanting none of the other three |
 
 **`autoAnswerScope` decides what may be answered, and this is the part to read.** It
-defaults to **`all`** — anything a session is blocked on, **permission prompts and plan
-approvals included** — and what a permission prompt has highlighted is *yes*. With the
-armed gear on and the scope left alone, Claude can be granted a tool you were not there to
-approve. That is the point of it for an overnight run, and `autoAnswerScope: "questions"`
-is the setting that keeps a human in front of every grant: a multiple-choice question's
-highlighted option is a *recommendation*, while a permission prompt's is a *decision*.
+defaults to **`questions`** — a multiple-choice question is answered for you, and a
+**permission prompt, a plan approval or a sandbox request is left exactly as it is**. The
+reason is the difference between the two: a question's highlighted option is a
+*recommendation*, while a permission prompt's is a *decision*, and what it has highlighted
+is *yes*. Answering one unattended grants Claude a tool nobody was there to approve, so
+that is not something a fresh install does on its own.
+
+`autoAnswerScope: "all"` is the opt-in for the run that must not stop for anything —
+anything a session is blocked on, permission prompts and plans included. It is exactly the
+old behaviour, and it is the right setting for a deliberate overnight run; it is simply
+switched on by the person who wants it rather than shipped to everyone. If a run stalls on
+a permission prompt, the light's hover says so in as many words — *"autoAnswerScope is
+questions only, and this is a permission prompt"* — and that is the setting to change.
 
 Which kind of prompt is up is not guessed. Claude Code writes **`waitingFor`** beside its
 `waiting` status in `~/.claude/sessions/<pid>.json` — `"input needed"` for a question with

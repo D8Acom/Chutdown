@@ -3,6 +3,28 @@
 All notable changes to Chutdown are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- **Auto-answer no longer answers permission prompts unless you ask it to.**
+  `autoAnswerScope` now defaults to **`questions`** instead of `all`. On a fresh install the
+  armed gear still answers a multiple-choice question after `autoAnswerMinutes` (5), but a
+  **permission prompt, a plan approval or a sandbox request is left exactly where it is** —
+  what one of those has highlighted is *yes*, and pressing it unattended granted Claude a
+  tool nobody was there to approve, moments before the machine powered off. `all` is
+  unchanged and still available; it is now something a person turns on for a run that must
+  not stop for anything, rather than the shipped default.
+- `src/answer.js`'s `scope()` used to fall back to `all` for any value that was not exactly
+  `"questions"`. VS Code does not coerce a setting to its schema, so a missing, misspelt or
+  workspace-overridden value would have kept the old behaviour even with the new default.
+  The fallback is now the safe end (`=== 'all' ? 'all' : 'questions'`), so the code and the
+  schema agree.
+- **On upgrade this changes behaviour.** A run that relied on unattended permission
+  approval will now stall on a permission prompt; the light's hover says why in as many
+  words — *"autoAnswerScope is questions only, and this is a permission prompt"* — and
+  setting `chutdown.autoAnswerScope` to `all` restores 0.1.8 exactly. Settings
+  descriptions, `README.md` and `docs/MANUAL.md` are reworded to match.
+
 ## [0.1.8] - 2026-08-24
 
 ### Added

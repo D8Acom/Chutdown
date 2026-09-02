@@ -57,8 +57,11 @@ gears, for up to `chutdown.shellMinutes` (default 60).*
 *And a session that stops to ask something need not stop the night: with the gear **armed**
 Chutdown answers for you after `chutdown.autoAnswerMinutes` (default 5) — one Enter, taking
 the option the dialog has highlighted. On by default for the armed gear only, opt-in for
-the other three, and `chutdown.autoAnswerScope: "questions"` keeps it away from permission
-prompts and plans. Both hovers say what is about to be pressed, and when.*
+the other three, and narrowed by default to multiple-choice questions
+(`chutdown.autoAnswerScope: "questions"`) — a permission prompt or a plan is left for you,
+because what one of those has highlighted is *yes*. Set the scope to `"all"` to have an
+unattended run answer those too. Both hovers say what is about to be pressed, and when —
+or why nothing is coming.*
 [Details →](docs/MANUAL.md#power-status-off--sound--notify--shutdown)
 
 ## The footer bar — every session at a glance

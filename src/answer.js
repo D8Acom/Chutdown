@@ -11,13 +11,14 @@
 // option the dialog has highlighted - the first one, and by convention the recommended
 // one. Nothing else is typed, ever: no arrow keys, no text, no second press.
 //
-// Said plainly, because the default scope is `all`: a PERMISSION prompt is answered too,
-// and what a permission prompt has highlighted is yes. That is deliberate - it is what
-// "keep going while I am asleep" means - but it is unattended approval of whatever Claude
-// asked for, so two things bound it. `autoAnswerScope: "questions"` narrows it to
-// multiple-choice questions and leaves permissions, plans and sandbox requests sitting
-// there; and every gear ships OFF except the armed one, where nobody is at the keyboard by
-// definition.
+// Said plainly, because the default scope is `questions`: only a multiple-choice question
+// is answered, and a PERMISSION prompt, a plan approval or a sandbox request is left
+// sitting there for a human. What a permission prompt has highlighted is yes, so answering
+// one unattended grants Claude a tool nobody was there to approve - which is a thing a
+// person may well want for an overnight run, and is therefore `autoAnswerScope: "all"`,
+// switched on deliberately rather than shipped. Two things bound the feature either way:
+// that scope, and every gear shipping OFF except the armed one, where nobody is at the
+// keyboard by definition.
 //
 // WHICH KIND of prompt is up comes from Claude Code's own session file, not from guessing:
 // `waitingFor` sits beside `status: "waiting"` and says "input needed" for a question,
@@ -52,10 +53,16 @@ function delayMs() {
     return Math.max(0, isFinite(n) ? n : 5) * 60_000;
 }
 
-/// `all` - anything the session is blocked on, permission prompts included.
 /// `questions` - only a multiple-choice question, which is the one kind of prompt where
-/// the highlighted option is a recommendation rather than a grant.
-function scope() { return shared.cfg().get('autoAnswerScope') === 'questions' ? 'questions' : 'all'; }
+/// the highlighted option is a recommendation rather than a grant. This is the default,
+/// here and in package.json, and it is what an unset or misspelt value falls back to:
+/// VS Code does not coerce a setting to its schema (the `lookbackMs` note in scan.js
+/// records the same trap), so the safe end has to be the code's fallback too. Anything
+/// else - the fallback used to be `all` - would silently grant permissions the schema
+/// default says are left alone.
+/// `all` - anything the session is blocked on, permission prompts included, which is
+/// unattended approval and therefore opt-in.
+function scope() { return shared.cfg().get('autoAnswerScope') === 'all' ? 'all' : 'questions'; }
 
 /// The CLI's own word for a question with options on screen.
 const QUESTION = 'input needed';
