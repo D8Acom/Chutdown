@@ -262,6 +262,11 @@ function activate(context) {
         }),
         vscode.commands.registerCommand('chutdown.openUsagePage', () =>
             vscode.env.openExternal(vscode.Uri.parse('https://claude.ai/settings/usage'))),
+        // Every diagnosis this extension has goes to the Chutdown output channel, and
+        // half a dozen messages tell the user to read it - this is the one click that
+        // gets them there, including on a window that has logged nothing yet (the
+        // channel is created lazily, so before this it was not even in the dropdown).
+        vscode.commands.registerCommand('chutdown.showLog', shared.showLog),
         // Clicking the meter steps its number to the next limit - a weekly window that
         // is spent pins it to "0%" otherwise, hiding the limits that still have room.
         vscode.commands.registerCommand('chutdown.cycleUsageFocus', usage.cycleUsageFocus),

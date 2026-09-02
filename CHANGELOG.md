@@ -3,6 +3,21 @@
 All notable changes to Chutdown are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **`Chutdown: Show Log` — the output channel finally has a way in.** Every diagnosis
+  Chutdown has goes to the *Chutdown* output channel, and half a dozen messages send you
+  there ("see the Chutdown output channel"), but nothing in the extension ever opened it —
+  and because the channel is created on its first log line, a window that had logged
+  nothing yet had no *Chutdown* entry in the Output dropdown to find. The new palette
+  command creates the channel if it does not exist and reveals it **without stealing
+  focus**. The messages that point at the log now point at the command: the
+  force-freed-port warning after *Start All Terminals* gets an **Open log** button, and
+  both usage-meter hovers get an **Open log** link (`chutdown.showLog` is added to their
+  `isTrusted.enabledCommands`, which is scoped by name). No new setting, no new gear, and
+  nothing writes to the channel by opening it.
+
 ## [0.1.8] - 2026-08-24
 
 ### Added
