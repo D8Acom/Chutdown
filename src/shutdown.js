@@ -449,7 +449,12 @@ function status() {
 /// exists to prevent. So the hold lasts `questionMinutes` from the moment the question
 /// went up (default 2), after which it is treated as abandoned and stops counting.
 function askingNow() {
-    const holdMs = Math.max(0, Number(shared.cfg().get('questionMinutes')) || 0) * 60_000;
+    // Through cfgNum, and deliberately: read as `Number(...) || 0` a mistyped
+    // questionMinutes became 0, and the line below reads 0 as "questions never hold it
+    // up" - the armed gear failing OPEN over a live question. An unusable value now
+    // falls back to the contributed default (2) and is named in the output channel; a
+    // value someone really did set to 0 still means never.
+    const holdMs = shared.cfgNum('questionMinutes', 2, 0) * 60_000;
     const now = Date.now();
     return status().asking.filter((s) => {
         if (!holdMs) return false;                       // 0 = questions never hold it up

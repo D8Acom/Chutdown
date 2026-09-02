@@ -111,7 +111,10 @@ function runningHere(s) {
 /// rather than "live in another window" - a transcript being written is the only
 /// evidence some other window still holds it.
 function orphanMs() {
-    return Math.max(0, shared.cfg().get('orphanMinutes')) * 60_000;
+    // Unclamped this was `Math.max(0, "2m")` -> NaN, and `quiet(s) < NaN` is false for
+    // every session, so one typo resolved every tab-less session to its transcript
+    // colour at once - a bar that flips from white to red for no reason on screen.
+    return shared.cfgNum('orphanMinutes', 2, 0) * 60_000;
 }
 
 /// Could anything still be RUNNING this session? A live terminal in this window can;
@@ -573,7 +576,7 @@ function renderStale(stale) {
     md.appendMarkdown('\n_Click a name to open or resume it - or the item for the whole list_  \n');
     // The two numbers that decide what is in this list, and what it can ever contain -
     // stated, and editable from here, because this entry is where you notice them.
-    const mins = Math.max(1, Number(shared.cfg().get('staleMinutes')) || 30);
+    const mins = shared.cfgNum('staleMinutes', 30, 1);
     const hours = Math.max(1, Number(shared.cfg().get('lookbackHours')) || 24);
     md.appendMarkdown('\nFolded here after **' + mins + ' min** quiet, unless open in a tab here.' +
         ' Remembered for **' + hours + 'h**.  \n');
@@ -605,11 +608,17 @@ function disposeSessionItems() {
 ///     one at any age (see renderSessions for why),
 ///   - tab closed: however young,
 ///   - quiet past staleMinutes AND not running in a tab here.
+///
+/// staleMinutes is read through cfgNum here, in showStale's title, in the idle hover and
+/// in naming.js, so all four say the same number - the old `Number(...) || 30` here and
+/// `Math.max(1, <raw>)` in naming.js disagreed about 0 (thirty minutes there, one minute
+/// here). A literal 0 now means the floor, one minute, everywhere: fold as soon as it
+/// goes quiet. An unusable value is the contributed default, 30, and is logged once.
 function isIdle(s) {
     if (!runningHere(s) && !claude.everBoundHere(s.id)) return true;
     if (s.closedTab) return true;
     if (runningHere(s)) return false;
-    return shared.quiet(s) >= Math.max(1, Number(shared.cfg().get('staleMinutes')) || 30) * 60_000;
+    return shared.quiet(s) >= shared.cfgNum('staleMinutes', 30, 1) * 60_000;
 }
 
 /// Which age band an idle session falls in. A day of work puts dozens of sessions in this
@@ -670,7 +679,7 @@ async function showStale() {
 
     const pick = await vscode.window.showQuickPick(picks, {
         title: 'Idle sessions - ' + list.length + ' quiet over ' +
-            (Number(shared.cfg().get('staleMinutes')) || 30) + ' min, or with their tab closed',
+            shared.cfgNum('staleMinutes', 30, 1) + ' min, or with their tab closed',
         placeHolder: 'Type to filter by name, prompt or folder',
         matchOnDescription: true,
         matchOnDetail: true

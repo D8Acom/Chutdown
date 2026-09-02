@@ -3,11 +3,28 @@
 All thirteen findings and all four nice-to-haves are **fixed** (2026-08-19), each with
 regression assertions in `test/smoke.js` under `== BUG: … ==` headings. Nothing from the
 original audit is outstanding. Kept as a record of what was wrong and why the code now
-looks the way it does.
+looks the way it does. Findings found later are dated where they appear (the settings
+clamp below is 2026-09-02); the smoke suite is currently held back — see `.gitignore` —
+so those carry manual reproduction steps rather than assertions.
 
 ## Fixed
 
 ### High
+
+**Three settings readers took the raw value, and one of them failed the armed gear open**
+(2026-09-02) — VS Code does not coerce a setting that violates the contributed schema, so
+`"2m"` or `null` arrives exactly as written. `src/shutdown.js` `askingNow` read
+`Math.max(0, Number(cfg().get('questionMinutes')) || 0)`, and the next line reads 0 as
+"questions never hold it up": one typo in `settings.json` turned off the hold that stops
+the machine powering down over a live question or permission prompt. `src/lights.js`
+`orphanMs` yielded `NaN`, and `quiet(s) < NaN` is false for everything, so every tab-less
+session resolved to its transcript colour at once. `src/naming.js` read
+`Math.max(1, cfg().get('staleMinutes'))`, which both `NaN`ed and disagreed with the lights'
+own stale predicate (`Number(...) || 30`) — the same shape as the "n idle" mismatch below.
+All of them now go through one helper, `shared.cfgNum(key, default, min)`, which clamps
+like `scan.js`'s `lookbackMs`/`noReplyMs` already did and logs an unusable value once,
+naming the setting. No default changed; a valid value behaves as before, except that a
+literal `staleMinutes` of `0` now means the one-minute floor in both readers.
 
 **An undated CLI status file was treated as eternally fresh** — `src/scan.js`
 `if (at && now - at > CLI_STATUS_MAX_AGE)` short-circuits on `at === 0`, so a file with no
