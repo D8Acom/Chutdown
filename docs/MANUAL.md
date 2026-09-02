@@ -825,6 +825,20 @@ which it is treated as abandoned and stops counting. `0` means questions never h
 shutdown up at all. Note this is the *shutdown's* patience only: the light stays 🟠 for as
 long as the session is actually waiting.
 
+**A mistyped number never turns a threshold off.** VS Code does not coerce a setting that
+breaks its contributed schema — `"2m"`, `null` or an emptied box arrives at the extension
+exactly as written — and `Number("2m")` is `NaN`, which quietly makes every comparison
+false. Read as `Number(questionMinutes) || 0` that came out as **0**, and 0 here means
+*never hold the shutdown up*: one typo in `settings.json` used to fail the armed gear
+**open** over a live question. Every numeric setting is now read through one clamp
+(`cfgNum` in `src/shared.js`): a usable value is used as written, an unusable one falls
+back to that setting's own documented default — 2 for `questionMinutes` and
+`orphanMinutes`, 30 for `staleMinutes` — and the **Chutdown** output channel says so once,
+naming the setting (`setting chutdown.questionMinutes = "2m" is not a number - using 2`).
+Nothing changes for a value that was already valid, with one tidy-up: a literal
+`staleMinutes` of `0` now means the one-minute floor everywhere, where it used to mean one
+minute to the AI namer and thirty to the lights.
+
 Knowing a question is up at all takes the CLI's own status file — see **🟠 waiting on
 you** under Traffic lights. A session with no such file falls back to what the transcript
 can infer, exactly as before.

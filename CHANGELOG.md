@@ -3,6 +3,26 @@
 All notable changes to Chutdown are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- **A mistyped number can no longer switch a threshold off — least of all the armed
+  gear's.** VS Code does not coerce a setting that breaks its contributed schema: `"2m"`,
+  `null` or an emptied box arrives exactly as written, and `Number("2m")` is `NaN`. Three
+  readers still took the raw value. `questionMinutes` was read as
+  `Math.max(0, Number(...) || 0)`, so a typo became **0** — and 0 means *questions never
+  hold the shutdown up*, a fail-open on the one path that does not undo, powering the
+  machine off over a live question or permission prompt. `orphanMinutes` (`src/lights.js`)
+  produced `NaN`, and `quiet(s) < NaN` is false for everything, so every session with no
+  tab in this window resolved to its transcript colour at once. `staleMinutes`
+  (`src/naming.js`) both `NaN`ed and disagreed with the lights' own stale predicate.
+  All three now go through one clamp, `shared.cfgNum(key, default, min)`: a usable value is
+  used as written, an unusable one falls back to that setting's contributed default (2, 2,
+  30) and is named once in the **Chutdown** output channel —
+  `setting chutdown.questionMinutes = "2m" is not a number - using 2`. No default changed.
+  One tidy-up: a literal `staleMinutes` of `0` now means the one-minute floor everywhere,
+  where it used to mean one minute to the AI namer and thirty to the lights.
+
 ## [0.1.8] - 2026-08-24
 
 ### Added

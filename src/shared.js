@@ -27,6 +27,59 @@ const cfg = () => vscode.workspace.getConfiguration('chutdown');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const quiet = (s) => Date.now() - s.lastWriteMs;
 
+// ------------------------------------------- reading a NUMBER out of settings
+//
+// VS Code does NOT coerce a setting that violates the contributed schema: a string
+// ("2m"), a null, an empty box in the settings UI arrives at get() exactly as written.
+// `Number("2m")` is NaN, and NaN poisons every comparison it touches SILENTLY - which
+// is how one typo in settings.json used to turn a threshold off rather than complain:
+//   Math.max(0, NaN) * 60_000     -> NaN, and `quiet(s) < NaN` is false for everything
+//   Math.max(0, Number(x) || 0)   -> 0, and 0 usually means "this check is off"
+// The second shape is the dangerous one, because it fails OPEN on the armed gear: a
+// mistyped questionMinutes read as 0, and 0 means "questions never hold the shutdown
+// up", so the machine could power down over a live question - the one path that does
+// not undo.
+//
+// So every numeric setting is read through here instead. A usable value is clamped to
+// `min` and returned unchanged; an unusable one falls back to the setting's OWN default
+// (never to 0) and says so once in the output channel, naming the setting - a threshold
+// that quietly did nothing is exactly the bug nobody reports.
+//
+// scan.js (lookbackMs, noReplyMs, shellMs), answer.js (delayMs), density.js (budget)
+// and shutdown.js (settleMs, countdownSeconds) already clamp inline in this spirit;
+// this is that rule with one implementation and a log line.
+
+/// key -> the unusable raw value already reported, so a broken setting is logged once
+/// rather than on every 5s poll. A value that becomes usable again clears its entry,
+/// so a SECOND typo is still reported.
+const badCfg = new Map();
+
+/// Read a numeric setting. `def` is the value's contributed default in package.json,
+/// used whenever the configured value is missing or unusable; `min` is the floor a
+/// usable value is clamped to (default 0).
+/// Returns a finite number, always.
+function cfgNum(key, def, min) {
+    const floor = min === undefined ? 0 : min;
+    const raw = cfg().get(key);
+    const n = Number(raw);
+    const usable = raw !== null && raw !== undefined && raw !== '' && isFinite(n);
+    if (!usable) {
+        // undefined = simply not set, which is not a mistake and not worth a line.
+        if (raw !== undefined) {
+            let shown;
+            try { shown = JSON.stringify(raw); } catch { shown = String(raw); }
+            if (badCfg.get(key) !== shown) {
+                badCfg.set(key, shown);
+                nlog('setting chutdown.' + key + ' = ' + shown +
+                    ' is not a number - using ' + def);
+            }
+        }
+        return Math.max(floor, def);
+    }
+    badCfg.delete(key);
+    return Math.max(floor, n);
+}
+
 function firstRoot() {
     const ws = vscode.workspace.workspaceFolders;
     return ws && ws.length ? ws[0].uri.fsPath : os.homedir();
@@ -258,7 +311,7 @@ function clearGate(gate) {
 
 Object.assign(module.exports, {
     PROJECTS, TASKS, SESSIONS, sessions, suppressed, termRecs, claudeRecs, items, state,
-    cfg, sleep, quiet, firstRoot, normCwd, tabMark, uniqueName, flat, humanize, coarse,
+    cfg, cfgNum, sleep, quiet, firstRoot, normCwd, tabMark, uniqueName, flat, humanize, coarse,
     paint, unpaint, nlog,
     mdText, mdCode, disposeLog, saveSuppressed, loadSuppressed, addGate, clearGate
 });

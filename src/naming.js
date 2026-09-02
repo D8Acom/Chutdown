@@ -78,7 +78,11 @@ function runNamer() {
     // on every single scan - shift, skip, recurse, forever, naming nothing. scan.js
     // clears it when the session actually starts working again, which is the only
     // event that makes another attempt worth anything.
-    if (shared.quiet(s) >= Math.max(1, shared.cfg().get('staleMinutes')) * 60_000) {
+    // Same reader as lights.js's own stale predicate, through the same helper: read
+    // here as `Math.max(1, <raw>)` this both NaN'd on a string and DISAGREED with
+    // lights.js ("Number(...) || 30"), so staleMinutes 0 meant one minute here and
+    // thirty there - the same shape of mismatch as the already-fixed "n idle" one.
+    if (shared.quiet(s) >= shared.cfgNum('staleMinutes', 30, 1) * 60_000) {
         runNamer();
         return;
     }
