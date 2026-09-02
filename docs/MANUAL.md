@@ -1254,7 +1254,15 @@ alongside the ones that were expected, and a port outside 1–65535 is dropped t
 leaving an entry that launches with no socket probe behind its light.
 
 A `port` — as a field, or as the `name:port` suffix in either syntax — means the
-light is driven by a real socket probe against that port, not just by shell events — and it makes the port **the entry's own**: before
+light is driven by a real socket probe against that port, not just by shell events. The
+probe tries **both loopback addresses**, `127.0.0.1` and `[::1]`, and the light is green
+as soon as either answers; it goes red only when both have refused or timed out. That
+matters because `listen(port, 'localhost')` on Node 17+ resolves to `::1` first and
+several toolchains bind it alone — an IPv4-only probe read such a server as DOWN, and
+clicking that light started a *second* copy on the next free port while the first kept
+the original. (The port **kill** path has always looked at both families.) On a machine
+with no IPv6 stack the `[::1]` attempt just fails and is not logged. And it makes the port
+**the entry's own**: before
 that entry is (re)launched, whatever is LISTENing on it is force-killed
 (`netstat` + `taskkill /PID … /T /F` on Windows; `lsof` plus a recursive `pgrep -P` walk
 on macOS; `ss -lntpH`, falling back to `lsof`, plus the same walk on Linux — the whole

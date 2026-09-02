@@ -389,31 +389,83 @@ function termLabels() {
     return [...shared.termRecs.values()].map((r) => r.label || r.name);
 }
 
+/// Both loopback families, because "localhost" is not one address. src/platform/win32.js
+/// already says it above its netstat call - "No '-p tcp': that misses a server bound only
+/// to IPv6 ([::1]:3003)" - and the KILL path has honoured that for a while; the PROBE
+/// used to connect to 127.0.0.1 alone. On Node 17+ `listen(port, 'localhost')` resolves
+/// to ::1 FIRST, and several toolchains bind it alone, so an IPv4-only probe read a
+/// perfectly healthy dev server as DOWN: the light said "port 3003 DOWN - click to
+/// restart", termRunning agreed, and the click took the START branch - a second copy of
+/// the server on the next free port, with the first one still holding 3003 behind a light
+/// that never went green. The stop sweep skipped killPort for it too, on the same false.
+///
+/// So: open a socket to 127.0.0.1 AND to ::1, resolve TRUE on the first one to connect,
+/// FALSE only when both have failed or timed out, and destroy the loser either way.
+/// A box with no IPv6 stack fails the ::1 attempt with EAFNOSUPPORT / EADDRNOTAVAIL /
+/// ENETUNREACH - that is the normal answer there, not an incident, so it is never
+/// logged; the IPv4 attempt decides on its own.
+const LOOPBACK_HOSTS = ['127.0.0.1', '::1'];
+
+/// Connect errors that mean only "this machine has no such address family". They are
+/// the expected outcome of the ::1 attempt on an IPv4-only box, so they stay quiet.
+const NO_FAMILY = new Set(['EAFNOSUPPORT', 'EADDRNOTAVAIL', 'ENETUNREACH', 'EPROTONOSUPPORT']);
+
+/// true = something answered on that port on either loopback address, false = nothing
+/// did within `timeoutMs`. REJECTS only when net.connect threw SYNCHRONOUSLY for every
+/// family for a reason that is not "no IPv6 here" - a bad port, essentially - which is
+/// what the callers turn into their one log line.
+function probeLoopback(port, timeoutMs) {
+    return new Promise((resolve, reject) => {
+        const socks = [];
+        let pending = 0, settled = false, hardThrow = null, threwAll = true;
+        const finish = (up) => {
+            if (settled) return;
+            settled = true;
+            for (const s of socks) { try { s.destroy(); } catch { } }
+            resolve(up);
+        };
+        for (const host of LOOPBACK_HOSTS) {
+            let sock;
+            // net.connect validates the port SYNCHRONOUSLY and throws. The port is
+            // validated at parse time now, but this call sits inside the poll: a throw
+            // here takes the whole tick with it - lights, renames, and the armed
+            // shutdown's own trigger. Nothing in the poll is worth that, so the probe
+            // fails closed instead.
+            try { sock = net.connect({ port, host }); }
+            catch (e) {
+                if (!hardThrow && !NO_FAMILY.has(e && e.code)) hardThrow = e;
+                continue;
+            }
+            threwAll = false;
+            socks.push(sock);
+            pending++;
+            const lose = () => {
+                try { sock.destroy(); } catch { }
+                if (--pending === 0) finish(false);
+            };
+            sock.setTimeout(timeoutMs);
+            sock.once('connect', () => finish(true));
+            sock.once('timeout', lose);
+            // Includes ECONNREFUSED (nothing there) and the no-IPv6 codes above: both
+            // are just "not on this address", and the other family still has its say.
+            sock.once('error', lose);
+        }
+        if (threwAll) {
+            if (hardThrow) reject(hardThrow);
+            else finish(false);
+        }
+    });
+}
+
 /// The truth about a ":port" entry comes from the socket, not from shell events -
 /// killing the process any which way flips the light within one poll.
 function probePort(rec) {
-    let sock;
-    // net.connect validates the port SYNCHRONOUSLY and throws. The port is validated
-    // at parse time now, but this call sits inside the poll: a throw here takes the
-    // whole tick with it - lights, renames, and the armed shutdown's own trigger.
-    // Nothing in the poll is worth that, so the probe fails closed instead.
-    try { sock = net.connect({ port: rec.port, host: '127.0.0.1' }); }
-    catch (e) {
+    probeLoopback(rec.port, 1500).then((up) => {
+        if (rec.portUp !== up) { rec.portUp = up; refreshTermItem(rec); updateStopItem(); }
+    }, (e) => {
         shared.nlog('probe ' + rec.name + ': ' + e.message);
         if (rec.portUp !== false) { rec.portUp = false; refreshTermItem(rec); updateStopItem(); }
-        return;
-    }
-    let done = false;
-    const finish = (up) => {
-        if (done) return;
-        done = true;
-        try { sock.destroy(); } catch { }
-        if (rec.portUp !== up) { rec.portUp = up; refreshTermItem(rec); updateStopItem(); }
-    };
-    sock.setTimeout(1500);
-    sock.once('connect', () => finish(true));
-    sock.once('timeout', () => finish(false));
-    sock.once('error', () => finish(false));
+    });
 }
 
 /// Force-kill whatever still LISTENs on the port (Ctrl+C didn't take), then wait for
@@ -520,16 +572,10 @@ function findRec(name) {
 }
 
 /// One yes/no probe, for the by-name /start skip - probePort writes to a record, and
-/// the entry being asked about may not have one yet.
-const portListening = (port) => new Promise((res) => {
-    let sock;
-    try { sock = net.connect({ port, host: '127.0.0.1' }); } catch { return res(false); }
-    const fin = (v) => { try { sock.destroy(); } catch { } res(v); };
-    sock.setTimeout(1000);
-    sock.once('connect', () => fin(true));
-    sock.once('timeout', () => fin(false));
-    sock.once('error', () => fin(false));
-});
+/// the entry being asked about may not have one yet. Same both-families rule (and the
+/// same shorter 1000 ms budget it always had); a throw is a silent "no" here, because
+/// this answer only decides whether /start skips an entry.
+const portListening = (port) => probeLoopback(port, 1000).catch(() => false);
 
 /// Restart ONE entry by name - what clicking its light does, minus the mouse. This is
 /// the agent-facing action (vscode://d8a.chutdown/restart?name=detf&ws=…): stop it
