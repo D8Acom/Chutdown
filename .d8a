@@ -1,19 +1,143 @@
-# .d8a — who governs this repository, and how to run it.
-#
-# Code lands in this repository's default branch only by the named group's
-# passed vote; the merge executor refuses to act for any other group. Delete
-# this file to withdraw consent. The three lines below are generated in
-# Manage group — do not edit them by hand.
+# .d8a — who governs this repository, how to run it, and how it earns.
+# Code lands on this branch only by the named group's passed vote; delete the
+# file to withdraw consent. The three lines below, tools: and payments: are
+# generated, never hand-edited. items: is generated too, and is the ONE a
+# passed Code proposal MAY edit — it is where the shop is set.
+# Everything else: https://d8a.com/docs?group=d8aaaa-chutdown#d8a-file
 version: 1
 group: d8a:d8aaaa-chutdown
 proof: l90eX-EypkO50doB-El49vuHVikS6XjDjrVXHwAoqJZxBLKNfx-XkRTDFFQdmBq5b8zTAusmumly5GQiUHRNOfksEReEFAzlGEM3wXLacexSwjk7t-OIbQk4cXfLqvlr_S9ICHRoAGCLAhg21jBFLdhpXy_0GfJ_cgr-JeW8rPCq0e35p0HK3dwjwhInzkLkl881Ext_v9KB0C03ynhPzZ3M-1lO-wFXu8czm4Zwza1wglku_rHOpCj_3M3f-TH4z5wqGUzeqFi6dTKymflFDkog8bto0ObWADzs2QNR7CMFu97dGLkguy0sujKKwxqLjpisZ6mhnoLNbdKnllRP6Q
 
-# Where this repository runs live, if anywhere — the footer shows it as a globe.
-# url: https://example.com
+# tools: — the group's own doors, for a person or an agent working here.
+tools:
+  group    = https://d8a.com/g/d8aaaa-chutdown
+  admin    = https://d8a.com/g/d8aaaa-chutdown?section=admin
+  items    = https://d8a.com/api/v1/store/items?group=d8aaaa-chutdown
+  checkout = https://d8a.com/api/v1/store/checkout
+  verify   = https://d8a.com/api/v1/store/orders/ORDER?group=d8aaaa-chutdown
 
-# How to run this repository. Yours to edit — the governance lines above are
-# not. One terminal per entry, launched together by the ▶ button in VS Code
-# (the VSD8A extension) and by nothing else.
+# payments: — the group's shop. Paste this block where it should appear on the
+# site; card payments land in the group's shared credit balance. Items and
+# prices are SET in the items: block below (`Name = $12.00 — one line`, one
+# per line, up to 50) — the platform reads it after every merge. A paid
+# buyer comes back with ?d8a_order=<id>; the block verifies it (tools: verify)
+# and fires the "group-store:paid" event — release the product there.
+payments:
+  <!-- Sell on your site: your items, a Buy button each. After a payment the buyer
+       returns here with ?d8a_order=<id>; the widget verifies it with the platform and
+       fires "group-store:paid" (window.groupStorePaid) — release the product there. -->
+  <div id="group-store"></div>
+  <script>
+  (function () {
+    var BASE = "https://d8a.com";
+    var GROUP = "d8aaaa-chutdown";
+    var esc = function (s) {
+      return String(s).replace(/[&<>"']/g, function (c) { return "&#" + c.charCodeAt(0) + ";"; });
+    };
+    var el = document.getElementById("group-store");
+    // The handshake: an order id is only proof once the platform says so.
+    var verify = function (id) {
+      return fetch(BASE + "/api/v1/store/orders/" + encodeURIComponent(id) + "?group=" + encodeURIComponent(GROUP))
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (d) { return d && d.paid ? d.order : null; })
+        .catch(function () { return null; });
+    };
+    window.groupStoreVerify = verify;
+    var back = (location.search.match(/[?&]d8a_order=([A-Za-z0-9_-]+)/) || [])[1];
+    if (back) verify(back).then(function (o) {
+      if (!o) return;
+      window.groupStorePaid = o;
+      if (el && el.parentNode) {
+        var p = document.createElement("p");
+        p.setAttribute("data-paid", o.id);
+        p.style.cssText = "font:13px system-ui,sans-serif;color:#059669";
+        p.innerHTML = "Paid: " + esc(o.itemName) + (o.quantity > 1 ? " \u00d7" + o.quantity : "") + " \u2014 order " + esc(o.id);
+        el.parentNode.insertBefore(p, el);
+      }
+      document.dispatchEvent(new CustomEvent("group-store:paid", { detail: o }));
+    });
+    if (!el) return;
+    // The list. What is on sale is read from the platform (s) and kept here so
+    // the Buy handler below, wired once, always sees the latest load.
+    var store = null;
+    // One place that draws the failure line, so the timeout and the .catch at
+    // the end show exactly the same thing. Try again re-runs the load in place.
+    var loadFailed = function () {
+      el.innerHTML = '<p role="status" style="font:13px system-ui,sans-serif;color:#9ca3af">The shop could not be reached. <button type="button" data-store-retry style="font:inherit;color:#7c5cff;background:none;border:0;padding:0;cursor:pointer;text-decoration:underline">Try again</button></p>';
+      var retry = el.querySelector("[data-store-retry]");
+      if (retry) retry.addEventListener("click", function () { load(); });
+    };
+    var load = function () {
+      el.innerHTML = '<p role="status" style="font:13px system-ui,sans-serif;color:#9ca3af">Loading what&#39;s on sale\u2026</p>';
+      // A request that never answers (captive wifi, a stalled proxy) never
+      // rejects, so without this the box would sit on the loading line for ever.
+      var done = false, timedOut = false;
+      var ctrl = window.AbortController ? new AbortController() : null;
+      var timer = setTimeout(function () {
+        if (done) return;
+        timedOut = true;
+        if (ctrl) { try { ctrl.abort(); } catch (err) { loadFailed(); } }  // rejects -> .catch below
+        else { loadFailed(); }                                             // no AbortController: draw it here
+      }, 12000);
+      fetch(BASE + "/api/v1/store/items?group=" + encodeURIComponent(GROUP), ctrl ? { signal: ctrl.signal } : undefined)
+        .then(function (r) {
+          if (timedOut) return null;              // late answer: the failure line stands
+          done = true;
+          clearTimeout(timer);                    // a slow but good render is never killed
+          if (!r.ok) throw new Error("HTTP " + r.status);
+          return r.json();
+        })
+        .then(function (s) {
+          if (!s) return;
+          if (!s.items) throw new Error("bad payload");
+          store = s;
+          if (!s.items.length) { el.innerHTML = '<p style="font:13px system-ui,sans-serif;color:#9ca3af">Nothing for sale right now.</p>'; return; }
+          el.innerHTML = s.items.map(function (it) {
+            return '<div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-top:1px solid #e5e7eb;font:14px system-ui,sans-serif">' +
+              '<div style="flex:1"><b>' + esc(it.name) + '</b>' +
+              (it.description ? '<div style="font-size:12px;color:#6b7280">' + esc(it.description) + '</div>' : '') + '</div>' +
+              '<span>' + esc(it.price) + '</span>' +
+              '<a href="' + esc(it.payUrl) + '" data-item="' + esc(it.id) + '" style="background:#7c5cff;color:#fff;border-radius:999px;padding:6px 14px;text-decoration:none">Buy</a></div>';
+          }).join("") + '<p style="font:11px system-ui,sans-serif;color:#9ca3af">Sold by <a href="' + esc(s.group.url) + '" style="color:#7c5cff">' + esc(s.group.name) + '</a></p>';
+        })
+        .catch(function () {
+          clearTimeout(timer);
+          loadFailed();
+        });
+    };
+    el.addEventListener("click", function (e) {
+      var a = e.target && e.target.closest ? e.target.closest("a[data-item]") : null;
+      var s = store;
+      if (!a || !s || !s.checkout.enabled) return;
+      e.preventDefault();
+      a.textContent = "Opening\u2026";
+      // Come back to this page — minus any earlier receipt on the URL.
+      var here = location.href.replace(/([?&])d8a_order=[^&#]*&?/, "$1").replace(/[?&](#|$)/, "$1");
+      // WHICH ONE the buyer chose (2026-09-04): put data-variant on the buy link
+      // and set it from your own size/colour control before the click. The
+      // platform stores it against the order and shows it on the group's Admin
+      // tab, so the seller can fulfil it. One short line; a variant that costs
+      // more is a separate item.
+      var variant = a.getAttribute("data-variant") || "";
+      fetch(s.checkout.url, { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ group: GROUP, item: a.getAttribute("data-item"), quantity: 1, variant: variant, returnUrl: here }) })
+        .then(function (r) { return r.json(); })
+        .then(function (d) { if (d.url) { location.href = d.url; } else { a.textContent = "Buy"; location.href = a.href; } })
+        .catch(function () { location.href = a.href; });
+    });
+    load();
+  })();
+  </script>
+
+# items: — what the group sells, and the ONE generated section a passed Code
+# proposal MAY edit: THIS is where they are set. The platform reads the block
+# after every merge (tools: items is the live copy) and the Admin tab shows
+# them read-only. Name = $price — one line, one per line, up to 50.
+# An empty block means nothing is for sale.
+items:
+
+# url: https://example.com   — where it runs live; shown as a globe once set.
+# run: — how to run it. Yours to edit; VS Code's ▶ (the VSD8A extension) launches each entry.
 run:
   {
     "// how to run it": "F5 in VS Code opens the Extension Development Host - that is the editor, not a terminal",
