@@ -867,12 +867,13 @@ VS Code revived empty after a quit has nothing listening in it). Each answer is 
 | `autoAnswerOff` | off | for a run you leave going overnight wanting none of the other three |
 
 **`autoAnswerScope` decides what may be answered, and this is the part to read.** It
-defaults to **`all`** — anything a session is blocked on, **permission prompts and plan
-approvals included** — and what a permission prompt has highlighted is *yes*. With the
-armed gear on and the scope left alone, Claude can be granted a tool you were not there to
-approve. That is the point of it for an overnight run, and `autoAnswerScope: "questions"`
-is the setting that keeps a human in front of every grant: a multiple-choice question's
-highlighted option is a *recommendation*, while a permission prompt's is a *decision*.
+defaults to **`questions`** — multiple-choice questions only, whose highlighted option is
+a *recommendation*. Permission prompts, plan approvals, sandbox and worker requests are
+left exactly as they are today, so a human stays in front of every grant with the setting
+untouched. `autoAnswerScope: "all"` is the opt-in for an unattended run that must not stop
+for anything — **permission prompts and plan approvals included** — and what a permission
+prompt has highlighted there is *yes*: switching to `all` is what lets Claude be granted a
+tool you were not there to approve.
 
 Which kind of prompt is up is not guessed. Claude Code writes **`waitingFor`** beside its
 `waiting` status in `~/.claude/sessions/<pid>.json` — `"input needed"` for a question with

@@ -3,6 +3,21 @@
 All notable changes to Chutdown are documented here.
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- **`chutdown.autoAnswerScope` now actually defaults to `questions`.** 0.1.8 decided the
+  armed gear should never grant a permission nobody was there to approve, but the manifest
+  still shipped `"default": "all"`, the manual still described `all` as the default and
+  `autoAnswerShutdown`'s own description still said the scope "defaults to everything,
+  PERMISSION PROMPTS INCLUDED" — three places restating the exact risk the decision closed,
+  while `src/answer.js`'s `scope()` already treated anything but the literal string
+  `"questions"` as `"all"`. A fresh install with the setting untouched was still granting
+  tools unattended. `package.json`'s enum default, `autoAnswerShutdown`'s description and
+  `docs/MANUAL.md`'s prose now all name `questions` as the default and `all` as the opt-in
+  for a run that must not stop for anything. No logic changed — `answer.js` already read
+  the corrected default correctly.
+
 ## [0.1.8] - 2026-08-24
 
 ### Added
