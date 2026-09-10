@@ -769,5 +769,5 @@ Object.assign(module.exports, {
     startAll, stopAll, restartAll, restartOne, stopOne, findRec,
     updateStopItem, toggleTerminal,
     captureExecution, executionEnded, onTerminalClosed, copyTerminalLog,
-    probePort, termLight, termState, disposeTermItems, refreshAllTermItems, termLabels
+    probePort, portListening, termLight, termState, disposeTermItems, refreshAllTermItems, termLabels
 });
