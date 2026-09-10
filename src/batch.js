@@ -392,28 +392,38 @@ function termLabels() {
 /// The truth about a ":port" entry comes from the socket, not from shell events -
 /// killing the process any which way flips the light within one poll.
 function probePort(rec) {
-    let sock;
-    // net.connect validates the port SYNCHRONOUSLY and throws. The port is validated
-    // at parse time now, but this call sits inside the poll: a throw here takes the
-    // whole tick with it - lights, renames, and the armed shutdown's own trigger.
-    // Nothing in the poll is worth that, so the probe fails closed instead.
-    try { sock = net.connect({ port: rec.port, host: '127.0.0.1' }); }
-    catch (e) {
-        shared.nlog('probe ' + rec.name + ': ' + e.message);
-        if (rec.portUp !== false) { rec.portUp = false; refreshTermItem(rec); updateStopItem(); }
-        return;
-    }
+    // Try both loopback addresses and treat the port as up if either connects.
+    const hosts = [ '127.0.0.1', '::1' ];
+    const sockets = [];
+    let pending = 0;
     let done = false;
     const finish = (up) => {
         if (done) return;
         done = true;
-        try { sock.destroy(); } catch { }
+        for (const s of sockets) {
+            try { s.destroy(); } catch { }
+        }
         if (rec.portUp !== up) { rec.portUp = up; refreshTermItem(rec); updateStopItem(); }
     };
-    sock.setTimeout(1500);
-    sock.once('connect', () => finish(true));
-    sock.once('timeout', () => finish(false));
-    sock.once('error', () => finish(false));
+    for (const host of hosts) {
+        let sock;
+        try { sock = net.connect({ port: rec.port, host }); }
+        catch (e) {
+            // Synchronous validation error for this host - try the other address.
+            shared.nlog('probe ' + rec.name + ' (' + host + '): ' + e.message);
+            continue;
+        }
+        pending++;
+        sockets.push(sock);
+        sock.setTimeout(1500);
+        sock.once('connect', () => finish(true));
+        sock.once('timeout', () => { pending--; if (pending === 0) finish(false); });
+        sock.once('error', () => { pending--; if (pending === 0) finish(false); });
+    }
+    // If every attempt threw synchronously above, fail closed.
+    if (pending === 0) {
+        if (rec.portUp !== false) { rec.portUp = false; refreshTermItem(rec); updateStopItem(); }
+    }
 }
 
 /// Force-kill whatever still LISTENs on the port (Ctrl+C didn't take), then wait for
@@ -522,13 +532,23 @@ function findRec(name) {
 /// One yes/no probe, for the by-name /start skip - probePort writes to a record, and
 /// the entry being asked about may not have one yet.
 const portListening = (port) => new Promise((res) => {
-    let sock;
-    try { sock = net.connect({ port, host: '127.0.0.1' }); } catch { return res(false); }
-    const fin = (v) => { try { sock.destroy(); } catch { } res(v); };
-    sock.setTimeout(1000);
-    sock.once('connect', () => fin(true));
-    sock.once('timeout', () => fin(false));
-    sock.once('error', () => fin(false));
+    const hosts = [ '127.0.0.1', '::1' ];
+    const socks = [];
+    let pending = 0;
+    let done = false;
+    const fin = (v) => { if (done) return; done = true; for (const s of socks) { try { s.destroy(); } catch { } } res(v); };
+    for (const host of hosts) {
+        let sock;
+        try { sock = net.connect({ port, host }); }
+        catch (e) { continue; }
+        pending++;
+        socks.push(sock);
+        sock.setTimeout(1000);
+        sock.once('connect', () => fin(true));
+        sock.once('timeout', () => { pending--; if (pending === 0) fin(false); });
+        sock.once('error', () => { pending--; if (pending === 0) fin(false); });
+    }
+    if (pending === 0) return res(false);
 });
 
 /// Restart ONE entry by name - what clicking its light does, minus the mouse. This is
