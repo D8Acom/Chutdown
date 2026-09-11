@@ -30,6 +30,36 @@ const claudeModelArg = (cmd) => (String(cmd || '').match(/(?:--model|-m)[= ]\s*(
 /// "not supported" look identical at creation time.
 const INTEGRATION_GRACE_MS = 6000;
 
+/// How long to wait for platform.listeningPids to respond before giving up. A hung
+/// netstat/lsof/ss would otherwise block the batch logic; we log the timeout and
+/// treat it as "no pids found" so the caller can proceed.
+const LISTEN_PID_TIMEOUT_MS = 7000;
+
+async function listeningPidsWithTimeout(port) {
+    // Wrap the platform call in a timeout. Never reject from here; on error or
+    // timeout we log and return an empty array so callers treat it as "nothing
+    // listening" rather than hang or crash.
+    try {
+        return await new Promise((resolve) => {
+            const timer = setTimeout(() => {
+                shared.nlog('port: listeningPids timed out for ' + port);
+                resolve([]);
+            }, LISTEN_PID_TIMEOUT_MS);
+            Promise.resolve(platform.listeningPids(port)).then((p) => {
+                clearTimeout(timer);
+                resolve(p);
+            }).catch((e) => {
+                clearTimeout(timer);
+                shared.nlog('port: listeningPids failed for ' + port + ': ' + (e && e.message ? e.message : String(e)));
+                resolve([]);
+            });
+        });
+    } catch (e) {
+        shared.nlog('port: listeningPids unexpected failure for ' + port + ': ' + (e && e.message ? e.message : String(e)));
+        return [];
+    }
+}
+
 /// Run a batch entry's command, and find out whether this terminal can tell us
 /// anything about it afterwards.
 ///
@@ -451,12 +481,12 @@ function probePort(rec) {
 /// port 3003 (1 process(es) killed)" while the port stayed exactly as busy as before -
 /// the UI claiming the one outcome the setting exists to prevent.
 async function killPort(port) {
-    const pids = await platform.listeningPids(port);
+    const pids = await listeningPidsWithTimeout(port);
     if (pids.length === 0) return { killed: 0, stillHeld: [] };
     await Promise.all(pids.map((pid) => platform.killPid(pid)));
     let held = pids;
     for (let i = 0; i < 10; i++) {
-        held = await platform.listeningPids(port);
+        held = await listeningPidsWithTimeout(port);
         if (held.length === 0) break;
         await shared.sleep(300);
     }
