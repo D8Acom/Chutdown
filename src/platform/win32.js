@@ -143,7 +143,11 @@ function listeningPids(port) {
 /// which is how killPid stays away from a command line with a stray argument in it.
 function killTreeCommand(pid) {
     const n = Number(pid);
-    return Number.isInteger(n) && n > 0 ? 'taskkill /PID ' + n + ' /T /F' : '';
+    // Match darwin.js's defensive checks: refuse anything that is not a safe positive
+    // integer greater than 1, and refuse the current process or its parent to avoid
+    // constructing a command that would target the extension host or its parent.
+    if (!Number.isInteger(n) || n <= 1 || n === process.pid || n === process.ppid) return '';
+    return 'taskkill /PID ' + n + ' /T /F';
 }
 
 function killPid(pid) {
