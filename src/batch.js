@@ -392,28 +392,49 @@ function termLabels() {
 /// The truth about a ":port" entry comes from the socket, not from shell events -
 /// killing the process any which way flips the light within one poll.
 function probePort(rec) {
-    let sock;
-    // net.connect validates the port SYNCHRONOUSLY and throws. The port is validated
-    // at parse time now, but this call sits inside the poll: a throw here takes the
-    // whole tick with it - lights, renames, and the armed shutdown's own trigger.
-    // Nothing in the poll is worth that, so the probe fails closed instead.
-    try { sock = net.connect({ port: rec.port, host: '127.0.0.1' }); }
-    catch (e) {
-        shared.nlog('probe ' + rec.name + ': ' + e.message);
+    // Probe both IPv4 and IPv6 loopback in parallel and accept the first successful
+    // connect. Use a shared timeout so a failing sequential probe does not double
+    // negative-case latency. Fail closed only when both sockets have errored or timed
+    // out.
+    let sock4 = null;
+    let sock6 = null;
+    try { sock4 = net.connect({ port: rec.port, host: '127.0.0.1' }); }
+    catch (e) { shared.nlog('probe ' + rec.name + ': ' + e.message); }
+    try { sock6 = net.connect({ port: rec.port, host: '::1' }); }
+    catch (e) { shared.nlog('probe ' + rec.name + ' (ipv6): ' + e.message); }
+
+    // If neither socket could be created synchronously, fail closed now.
+    if (!sock4 && !sock6) {
         if (rec.portUp !== false) { rec.portUp = false; refreshTermItem(rec); updateStopItem(); }
         return;
     }
-    let done = false;
+
+    let finished = false;
+    let failures = 0;
     const finish = (up) => {
-        if (done) return;
-        done = true;
-        try { sock.destroy(); } catch { }
+        if (finished) return;
+        finished = true;
+        try { if (sock4) sock4.destroy(); } catch { }
+        try { if (sock6) sock6.destroy(); } catch { }
         if (rec.portUp !== up) { rec.portUp = up; refreshTermItem(rec); updateStopItem(); }
     };
-    sock.setTimeout(1500);
-    sock.once('connect', () => finish(true));
-    sock.once('timeout', () => finish(false));
-    sock.once('error', () => finish(false));
+
+    const onSuccess = () => finish(true);
+    const onFailure = () => {
+        failures++;
+        if (failures === 2) finish(false);
+    };
+
+    const attach = (sock) => {
+        if (!sock) return onFailure();
+        sock.setTimeout(1500);
+        sock.once('connect', onSuccess);
+        sock.once('timeout', onFailure);
+        sock.once('error', onFailure);
+    };
+
+    attach(sock4);
+    attach(sock6);
 }
 
 /// Force-kill whatever still LISTENs on the port (Ctrl+C didn't take), then wait for
@@ -522,13 +543,36 @@ function findRec(name) {
 /// One yes/no probe, for the by-name /start skip - probePort writes to a record, and
 /// the entry being asked about may not have one yet.
 const portListening = (port) => new Promise((res) => {
-    let sock;
-    try { sock = net.connect({ port, host: '127.0.0.1' }); } catch { return res(false); }
-    const fin = (v) => { try { sock.destroy(); } catch { } res(v); };
-    sock.setTimeout(1000);
-    sock.once('connect', () => fin(true));
-    sock.once('timeout', () => fin(false));
-    sock.once('error', () => fin(false));
+    // Race IPv4 and IPv6 loopback like probePort, but resolve the promise true as
+    // soon as either connects. Use one shared timeout for both sockets.
+    let sock4 = null;
+    let sock6 = null;
+    try { sock4 = net.connect({ port, host: '127.0.0.1' }); } catch { }
+    try { sock6 = net.connect({ port, host: '::1' }); } catch { }
+    if (!sock4 && !sock6) return res(false);
+    let finished = false;
+    let failures = 0;
+    const fin = (v) => {
+        if (finished) return;
+        finished = true;
+        try { if (sock4) sock4.destroy(); } catch { }
+        try { if (sock6) sock6.destroy(); } catch { }
+        res(v);
+    };
+    const onSuccess = () => fin(true);
+    const onFailure = () => {
+        failures++;
+        if (failures === 2) fin(false);
+    };
+    const attach = (sock) => {
+        if (!sock) return onFailure();
+        sock.setTimeout(1000);
+        sock.once('connect', onSuccess);
+        sock.once('timeout', onFailure);
+        sock.once('error', onFailure);
+    };
+    attach(sock4);
+    attach(sock6);
 });
 
 /// Restart ONE entry by name - what clicking its light does, minus the mouse. This is
