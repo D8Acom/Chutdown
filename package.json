@@ -200,6 +200,11 @@
           "default": true,
           "description": "Before (re)launching a '.terminals' entry named 'name:port', force-kill whatever is LISTENing on that port - including servers started outside VS Code - and wait for the socket to clear (netstat + taskkill on Windows, lsof + kill on macOS, ss - falling back to lsof - plus the same kill on Linux; pgrep must be installed for the tree walk). Off means a busy port silently moves the new server to the next free one instead."
         },
+        "chutdown.listenPidTimeoutMs": {
+          "type": "number",
+          "default": 7000,
+          "description": "How many milliseconds to wait for platform.listeningPids to respond before treating the call as timed out. Useful on slow or constrained machines; values under 1000 ms are clamped to 1000 ms by the code."
+        },
         "chutdown.noReplyMinutes": {
           "type": "number",
           "default": 5,

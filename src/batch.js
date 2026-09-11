@@ -30,10 +30,14 @@ const claudeModelArg = (cmd) => (String(cmd || '').match(/(?:--model|-m)[= ]\s*(
 /// "not supported" look identical at creation time.
 const INTEGRATION_GRACE_MS = 6000;
 
-/// How long to wait for platform.listeningPids to respond before giving up. A hung
-/// netstat/lsof/ss would otherwise block the batch logic; we log the timeout and
-/// treat it as "no pids found" so the caller can proceed.
-const LISTEN_PID_TIMEOUT_MS = 7000;
+/// Get the listening-pids timeout from configuration. The setting is
+/// `chutdown.listenPidTimeoutMs` (milliseconds). Defaults to 7000 and is clamped to a
+/// sensible minimum of 1000 ms to avoid accidental zero/negative values.
+function getListenPidTimeoutMs() {
+    const raw = Number(shared.cfg().get('listenPidTimeoutMs'));
+    if (!Number.isFinite(raw) || raw <= 0) return 7000;
+    return Math.max(1000, Math.floor(raw));
+}
 
 async function listeningPidsWithTimeout(port) {
     // Wrap the platform call in a timeout. Never reject from here; on error or
@@ -44,7 +48,7 @@ async function listeningPidsWithTimeout(port) {
             const timer = setTimeout(() => {
                 shared.nlog('port: listeningPids timed out for ' + port);
                 resolve([]);
-            }, LISTEN_PID_TIMEOUT_MS);
+            }, getListenPidTimeoutMs());
             Promise.resolve(platform.listeningPids(port)).then((p) => {
                 clearTimeout(timer);
                 resolve(p);
